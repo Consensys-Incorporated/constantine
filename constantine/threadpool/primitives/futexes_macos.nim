@@ -105,12 +105,12 @@ proc increment*(futex: var Futex, value: uint32, order: MemoryOrder): uint32 {.i
 
 proc wait*(futex: var Futex, expected: uint32) {.inline.} =
   ## Suspend a thread if the value of the futex is the same as expected.
-  discard ulock_wait(UL_UNFAIR_LOCK64_SHARED or ULF_NO_ERRNO, futex.value.addr, uint64 expected, 0)
+  discard ulock_wait(UL_COMPARE_AND_WAIT or ULF_NO_ERRNO, futex.value.addr, uint64 expected, 0)
 
 proc wake*(futex: var Futex) {.inline.} =
   ## Wake one thread (from the same process)
-  discard ulock_wake(ULF_WAKE_THREAD or ULF_NO_ERRNO, futex.value.addr, 0)
+  discard ulock_wake(UL_COMPARE_AND_WAIT or ULF_NO_ERRNO, futex.value.addr, 0)
 
 proc wakeAll*(futex: var Futex) {.inline.} =
   ## Wake all threads (from the same process)
-  discard ulock_wake(ULF_WAKE_ALL or ULF_NO_ERRNO, futex.value.addr, 0)
+  discard ulock_wake(UL_COMPARE_AND_WAIT or ULF_WAKE_ALL or ULF_NO_ERRNO, futex.value.addr, 0)
