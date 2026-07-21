@@ -60,7 +60,7 @@ const # bitfield setup
   # - Xeon Platinum 8490H, 60C/120T per socket
   #   - up to 8 sockets: 960 threads
 
-  kPreWaitShift = 8'u32
+  kPreWaitShift = 16'u32
   kPreWait      = 1'u32 shl kPreWaitShift
   kWait         = 1'u32
   kCommitToWait = kWait - kPreWait
