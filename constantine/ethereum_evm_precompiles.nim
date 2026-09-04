@@ -26,8 +26,9 @@ import
   ./ethereum_ecdsa_signatures
 
 # For KZG point precompile
-export EthereumKZGContext, TrustedSetupFormat, TrustedSetupStatus,
-  newEmbedded, delete
+export EthereumKZGContext, TrustedSetupFormat, TrustedSetupStatus, delete
+when defined(CTT_EMBEDDED_KZG):
+  export newEmbedded
 when not defined(standalone):
   export new, new_with_precompute
 
@@ -1370,5 +1371,76 @@ func eth_evm_ecrecover*(r: var openArray[byte],
 
   # 5. and effectively truncate to last 20 bytes of digest
   r.rawCopy(12, dgst, 12, 20)
+
+  result = cttEVM_Success
+
+func eth_evm_secp256k1_verify*(r: var openArray[byte],
+                               input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
+  ## Verify an ECDSA signature over secp256k1 against a given public key.
+  ##
+  ## This is NOT an Ethereum precompile (no EIP assigns an address to ECDSA
+  ## verification); it exposes the raw verify primitive for accelerator ABIs
+  ## that operate on the public key directly, complementing eth_evm_ecrecover
+  ## (which recovers a key). The message is a pre-hashed 32-byte digest, so no
+  ## hash function runs here.
+  ##
+  ## Inputs:
+  ##   - `input`: 160 bytes, big-endian concatenation of
+  ##     - 32 byte: message digest (the `z` scalar, reduced mod the curve order)
+  ##     - 32 byte: public key `x` coordinate
+  ##     - 32 byte: public key `y` coordinate
+  ##     - 32 byte: signature `r` scalar
+  ##     - 32 byte: signature `s` scalar
+  ##   - `r`: 1-byte output, 1 if the signature is valid else 0
+  ##
+  ## Output:
+  ## - status code:
+  ##   cttEVM_Success (the verification result is in `r`, success or not)
+  ##   cttEVM_InvalidInputSize
+  ##   cttEVM_InvalidOutputSize
+  ##   cttEVM_IntLargerThanModulus / cttEVM_PointNotOnCurve (public key rejected)
+  if len(input) != 160:
+    return cttEVM_InvalidInputSize
+
+  if len(r) != 1:
+    return cttEVM_InvalidOutputSize
+
+  # 1. public key from affine coordinates
+  # Rejects coordinates >= p, the point at infinity (both coordinates zero),
+  # and points not on the curve (secp256k1 has cofactor 1, so on-curve
+  # implies in the prime-order subgroup).
+  var pubKey {.noinit.}: PublicKey
+  privateAccess(PublicKey)
+  block:
+    var xBI {.noinit.}, yBI {.noinit.}: BigInt[256]
+    xBI.unmarshal(input.toOpenArray(32,  64-1), bigEndian)
+    yBI.unmarshal(input.toOpenArray(64,  96-1), bigEndian)
+    if bool(xBI >= Fp[Secp256k1].getModulus()) or
+       bool(yBI >= Fp[Secp256k1].getModulus()):
+      return cttEVM_IntLargerThanModulus
+    if bool(xBI.isZero()) and bool(yBI.isZero()):
+      return cttEVM_PointNotOnCurve
+    pubKey.raw.x.fromBig(xBI)
+    pubKey.raw.y.fromBig(yBI)
+    if not bool(isOnCurve(pubKey.raw.x, pubKey.raw.y, G1)):
+      return cttEVM_PointNotOnCurve
+
+  # 2. message digest as a scalar in `Fr[Secp256k1]` (reduced mod the order)
+  var msgBI {.noinit.}: BigInt[256]
+  msgBI.unmarshal(input.toOpenArray(0, 32-1), bigEndian)
+  var msgHash {.noinit.}: Fr[Secp256k1]
+  msgHash.fromBig(msgBI)
+
+  # 3. unmarshal signature scalars
+  var signature {.noinit.}: Signature
+  privateAccess(Signature)
+  var rSig {.noinit.}, sSig {.noinit.}: BigInt[256]
+  rSig.unmarshal(input.toOpenArray( 96, 128-1), bigEndian)
+  sSig.unmarshal(input.toOpenArray(128, 160-1), bigEndian)
+  signature.r = Fr[Secp256k1].fromBig(rSig)
+  signature.s = Fr[Secp256k1].fromBig(sSig)
+
+  # 4. verify
+  r[0] = byte pubKey.verifyFromDigest(msgHash, signature)
 
   result = cttEVM_Success

@@ -255,7 +255,7 @@ proc coreSign*[Sig, SecKey](
   # 2. sign
   signature.signImpl(secretKey, msgHash, H, nonceSampler)
 
-proc verifyImpl[Name: static Algebra; Sig](
+proc verifyImpl*[Name: static Algebra; Sig](
     publicKey: EC_ShortW_Aff[Fp[Name], G1],
     signature: Sig,
     msgHash: Fr[Name]

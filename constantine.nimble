@@ -344,7 +344,7 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec nim & " c " &
        releaseBuildOptions(bmStaticLib) &
        " --cc:clang " &
-       " --cpu:riscv64 --os:standalone -d:noSignalHandler " &
+       " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG " &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
        " --threads:on " &
        " --noMain --app:staticlib " &

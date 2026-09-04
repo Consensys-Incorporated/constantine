@@ -490,52 +490,59 @@ when not defined(standalone):
 # G2 points 192 + '\n' (the compressed encoding always sets the first bit, so
 # there are no omitted leading zeros) — one slice per point, no stdio.
 
-const kzgSetupEmbedded = staticRead("trusted_setup_ethereum_kzg4844_reference.dat")
+# Embedded trusted setup (opt-in via -d:CTT_EMBEDDED_KZG).
+# staticRead bakes the ~807KB reference setup into the binary; the guest build
+# defines CTT_EMBEDDED_KZG, hosts that load from a file leave it undefined so
+# their binaries stay lean. Nim does not evaluate staticRead in a dead branch,
+# so undefined builds skip the read entirely.
+when defined(CTT_EMBEDDED_KZG):
+  const kzgSetupEmbedded = staticRead("trusted_setup_ethereum_kzg4844_reference.dat")
 
-const
-  g1HexChars = 2*48   # 96 hex chars per compressed G1 point
-  g2HexChars = 2*96   # 192 hex chars per compressed G2 point
-  kzgHeaderLen = len("4096\n65\n")
+  const
+    g1HexChars = 2*48   # 96 hex chars per compressed G1 point
+    g2HexChars = 2*96   # 192 hex chars per compressed G2 point
+    kzgHeaderLen = len("4096\n65\n")
 
-proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
-  if kzgSetupEmbedded.len != kzgHeaderLen +
-      FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1) +
-      KZG_SETUP_G2_LENGTH * (g2HexChars + 1) +
-      FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1):
-    return tsInvalidFile
-
-  template line(lo: int, hexChars: int): untyped =
-    kzgSetupEmbedded.toOpenArray(lo, lo + hexChars - 1)
-
-  var offset = kzgHeaderLen
-
-  for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-    if ctx.deserializeLagrangeG1(i, line(offset, g1HexChars)) != tsSuccess:
+  proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
+    if kzgSetupEmbedded.len != kzgHeaderLen +
+        FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1) +
+        KZG_SETUP_G2_LENGTH * (g2HexChars + 1) +
+        FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1):
       return tsInvalidFile
-    offset += g1HexChars + 1
 
-  for i in 0 ..< KZG_SETUP_G2_LENGTH:
-    if ctx.deserializeMonomialG2(i, line(offset, g2HexChars)) != tsSuccess:
-      return tsInvalidFile
-    offset += g2HexChars + 1
+    template line(lo: int, hexChars: int): untyped =
+      kzgSetupEmbedded.toOpenArray(lo, lo + hexChars - 1)
 
-  for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-    if ctx.deserializeMonomialG1(i, line(offset, g1HexChars)) != tsSuccess:
-      return tsInvalidFile
-    offset += g1HexChars + 1
+    var offset = kzgHeaderLen
 
-  tsSuccess
+    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+      if ctx.deserializeLagrangeG1(i, line(offset, g1HexChars)) != tsSuccess:
+        return tsInvalidFile
+      offset += g1HexChars + 1
 
-proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
-  ## Create a KZG context from the trusted setup embedded at compile time.
-  ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
-  result = ctx.loadEmbedded()
-  if result != tsSuccess:
-    freeHeapAligned(ctx)
-    ctx = nil
-    return
-  ctx.setupKzg4844ProtoDanksharding()
-  ctx.setupKzg7594PeerDAS(t=0, b=0)
+    for i in 0 ..< KZG_SETUP_G2_LENGTH:
+      if ctx.deserializeMonomialG2(i, line(offset, g2HexChars)) != tsSuccess:
+        return tsInvalidFile
+      offset += g2HexChars + 1
+
+    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+      if ctx.deserializeMonomialG1(i, line(offset, g1HexChars)) != tsSuccess:
+        return tsInvalidFile
+      offset += g1HexChars + 1
+
+    tsSuccess
+
+  proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
+    ## Create a KZG context from the trusted setup embedded at compile time.
+    ## Only available when built with -d:CTT_EMBEDDED_KZG.
+    ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
+    result = ctx.loadEmbedded()
+    if result != tsSuccess:
+      freeHeapAligned(ctx)
+      ctx = nil
+      return
+    ctx.setupKzg4844ProtoDanksharding()
+    ctx.setupKzg7594PeerDAS(t=0, b=0)
 
 proc delete*(ctx: ptr EthereumKZGContext) {.exportc: "ctt_eth_kzg_context_delete".} =
   # Not why but `=destroy`(ctx.polyphaseSpectrumBank)

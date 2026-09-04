@@ -241,6 +241,10 @@ ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_with_precompute(
  *  Uses the EIP-4844 reference SRS baked into the binary (no filesystem access),
  *  so it is the constructor usable in freestanding / bare-metal (zkVM guest)
  *  builds. Sets the context to kNoPrecompute mode (~1.8 MiB).
+ *
+ *  Only present when the library is built with -d:CTT_EMBEDDED_KZG; that define
+ *  bakes the ~807KB reference SRS into the binary, so file-loading builds leave
+ *  it undefined and do not export this symbol.
  */
 ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_embedded(
     ctt_eth_kzg_context** ctx

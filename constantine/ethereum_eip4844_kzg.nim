@@ -24,8 +24,9 @@ import
 export
   delete,
   TrustedSetupFormat, TrustedSetupStatus, EthereumKZGContext,
-  FIELD_ELEMENTS_PER_BLOB,
-  newEmbedded
+  FIELD_ELEMENTS_PER_BLOB
+when defined(CTT_EMBEDDED_KZG):
+  export newEmbedded
 when not defined(standalone):
   export new, new_with_precompute
 
