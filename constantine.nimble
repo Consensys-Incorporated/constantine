@@ -332,6 +332,37 @@ task make_lib_rust, "Build Constantine library (use within a Rust build.rs scrip
                  else: " --passC:-fPIC "
   genStaticLib(rustOutDir, rustOutDir/"nimcache", extflags)
 
+task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im freestanding (no OS, no libc)":
+  ## Cross-compile to a bare-metal rv64im target: --os:standalone selects the
+  ## freestanding gates in the library (embedded KZG SRS, no fileio/stdio), and the
+  ## clang driver shim supplies the target flags + declaration-only headers. The
+  ## freestanding stdio backing (stderr/fwrite/fflush/exit for the Nim runtime's OOM
+  ## path) is compiled alongside and added to the archive.
+  let wrapper = "constantine/platforms/clang-rv64-standalone.sh"
+  exec "chmod +x " & wrapper
+  let nim = if existsEnv"NIM": getEnv"NIM" else: "nim"
+  exec nim & " c " &
+       releaseBuildOptions(bmStaticLib) &
+       " --cc:clang " &
+       " --cpu:riscv64 --os:standalone -d:noSignalHandler " &
+       " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
+       " --threads:on " &
+       " --noMain --app:staticlib " &
+       " --nimMainPrefix:ctt_init_ " &
+       " --out:libconstantine.riscv64.a --outdir:lib " &
+       " --nimcache:nimcache/libconstantine_riscv64_freestanding " &
+       " bindings/lib_constantine.nim"
+  exec wrapper & " -c constantine/platforms/standalone_stdio.c" &
+       " -o nimcache/libconstantine_riscv64_freestanding/standalone_stdio.riscv64.o"
+  # Nim ran the host ar/ranlib, which clobbers a foreign-arch archive's index; rebuild
+  # the archive from the nimcache objects (+ the stdio object) with llvm-ar.
+  let ar = if existsEnv"LLVM_AR": getEnv"LLVM_AR"
+           elif fileExists"/opt/homebrew/opt/llvm/bin/llvm-ar": "/opt/homebrew/opt/llvm/bin/llvm-ar"
+           elif fileExists"/usr/local/opt/llvm/bin/llvm-ar": "/usr/local/opt/llvm/bin/llvm-ar"
+           else: "llvm-ar"
+  exec ar & " rcs lib/libconstantine.riscv64.a" &
+       " nimcache/libconstantine_riscv64_freestanding/*.o"
+
 task make_zkalc, "Build a benchmark executable for zkalc (with Clang)":
   exec "nim c --cc:clang " &
        releaseBuildOptions(bmBinary) &

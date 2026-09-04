@@ -27,7 +27,9 @@ import
 
 # For KZG point precompile
 export EthereumKZGContext, TrustedSetupFormat, TrustedSetupStatus,
-  new, new_with_precompute, delete
+  newEmbedded, delete
+when not defined(standalone):
+  export new, new_with_precompute
 
 # Technically not a precompile but reexport hashes
 # They include Keccak, SHA256 and RipeMD160

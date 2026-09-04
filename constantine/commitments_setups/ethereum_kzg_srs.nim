@@ -239,113 +239,129 @@ type
   TrustedSetupFormat* = enum
     kReferenceCKzg4844
 
-proc load_ckzg4844(ctx: ptr EthereumKZGContext, f: File): TrustedSetupStatus =
-  ## Read a trusted setup in the reference library c-kzg-4844 format
-  # Format is the following (c-kzg-4844 with Monomial G1 for FK20):
-  # <nG1: number of G1 points>
-  # <nG2: number of G2 points>
-  # <Hex encoding of compressed G1 point (Lagrange): 0>
-  # ...
-  # <Hex encoding of compressed G1 point (Lagrange): nG1 - 1>
-  # <Hex encoding of compressed G2 point (Monomial): 0>
-  # ...
-  # <Hex encoding of compressed G2 point (Monomial): nG2 - 1>
-  # <Hex encoding of compressed G1 point (Monomial): 0>
-  # ...
-  # <Hex encoding of compressed G1 point (Monomial): nG1 - 1>
-  #
-  # Each line is terminated by new line/line feed (binary byte 10)
-  #
-  # The compressed encoding of BLS12-381 points requires the first bit
-  # to be set, hence there is no omitted leading zeros to deal with:
-  # - a G1 point always takes  96 hex characters + 1 newline
-  # - a G2 point always takes 192 hex characters + 1 newline
+# Point deserialization shared by the file loader (load_ckzg4844) and the
+# compile-time-embedded loader (ethereum_kzg_srs_embedded.nim). Source-agnostic: each
+# caller supplies hex strings; these decode + deserialize into the context. No stdio.
+# On disk, G1 points are stored in natural order and are bit-reversed later by
+# setupKzg4844ProtoDanksharding.
+proc deserializeLagrangeG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
+  var buf {.noInit.}: array[48, byte]
+  buf.fromHex(hex)
+  if ctx.srs_lagrange_brp_g1.evals[i].deserialize_g1_compressed(buf) != cttCodecEcc_Success:
+    return tsInvalidFile
+  tsSuccess
 
-  const g1Bytes = 48
-  const g2Bytes = 96
+proc deserializeMonomialG2(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
+  var buf {.noInit.}: array[96, byte]
+  buf.fromHex(hex)
+  if ctx.srs_monomial_g2.coefs[i].deserialize_g2_compressed(buf) != cttCodecEcc_Success:
+    return tsInvalidFile
+  tsSuccess
 
-  # fscanf and \r, \n (CRLF, end-of-line) peculiarities.
-  # We open files in binary mode, to ensure same treatment on Windows and Unix.
-  # However `git clone` (or other tools) might auto-convert to CRLF on Windows,
-  # so the parser needs to be able to parse both \n and \r\n line endings.
-  #
-  # We harden all use with a width parameter to prevent:
-  # - undefined behavior on int overflow
-  # - buffer overflow on lines being too long.
+proc deserializeMonomialG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
+  var buf {.noInit.}: array[48, byte]
+  buf.fromHex(hex)
+  if ctx.srs_monomial_g1.coefs[i].deserialize_g1_compressed(buf) != cttCodecEcc_Success:
+    return tsInvalidFile
+  tsSuccess
 
-  # fscanf for up to 4 digits. fscanf ignores whitespaces and \r when parsing an int
-  const parseInt32 = "%4u\n"
-  # fscanf for up to 96 chars, up until EOL, reporting number read, with EOL skipping
-  const readHexG1 = "%96[^\r\n]%n%*[\r\n]"
-  # fscanf for up to 192 chars, up until EOL, reporting number read, with EOL skipping
-  const readHexG2 = "%192[^\r\n]%n%*[\r\n]"
+when not defined(standalone):
+  proc load_ckzg4844(ctx: ptr EthereumKZGContext, f: File): TrustedSetupStatus =
+    ## Read a trusted setup in the reference library c-kzg-4844 format
+    # Format is the following (c-kzg-4844 with Monomial G1 for FK20):
+    # <nG1: number of G1 points>
+    # <nG2: number of G2 points>
+    # <Hex encoding of compressed G1 point (Lagrange): 0>
+    # ...
+    # <Hex encoding of compressed G1 point (Lagrange): nG1 - 1>
+    # <Hex encoding of compressed G2 point (Monomial): 0>
+    # ...
+    # <Hex encoding of compressed G2 point (Monomial): nG2 - 1>
+    # <Hex encoding of compressed G1 point (Monomial): 0>
+    # ...
+    # <Hex encoding of compressed G1 point (Monomial): nG1 - 1>
+    #
+    # Each line is terminated by new line/line feed (binary byte 10)
+    #
+    # The compressed encoding of BLS12-381 points requires the first bit
+    # to be set, hence there is no omitted leading zeros to deal with:
+    # - a G1 point always takes  96 hex characters + 1 newline
+    # - a G2 point always takes 192 hex characters + 1 newline
 
-  block:
-    var num_matches: cint
-    var n: cuint
+    const g1Bytes = 48
+    const g2Bytes = 96
 
-    # G1 points metadata
-    num_matches = f.c_fscanf(parseInt32, n.addr)
-    if num_matches != 1 or n != FIELD_ELEMENTS_PER_BLOB:
-      return tsInvalidFile
+    # fscanf and \r, \n (CRLF, end-of-line) peculiarities.
+    # We open files in binary mode, to ensure same treatment on Windows and Unix.
+    # However `git clone` (or other tools) might auto-convert to CRLF on Windows,
+    # so the parser needs to be able to parse both \n and \r\n line endings.
+    #
+    # We harden all use with a width parameter to prevent:
+    # - undefined behavior on int overflow
+    # - buffer overflow on lines being too long.
 
-    # G2 points metadata
-    num_matches = f.c_fscanf(parseInt32, n.addr)
-    if num_matches != 1 or n != KZG_SETUP_G2_LENGTH:
-      return tsInvalidFile
+    # fscanf for up to 4 digits. fscanf ignores whitespaces and \r when parsing an int
+    const parseInt32 = "%4u\n"
+    # fscanf for up to 96 chars, up until EOL, reporting number read, with EOL skipping
+    const readHexG1 = "%96[^\r\n]%n%*[\r\n]"
+    # fscanf for up to 192 chars, up until EOL, reporting number read, with EOL skipping
+    const readHexG2 = "%192[^\r\n]%n%*[\r\n]"
 
-  block:
-    # G1 points - 96 characters + newline
-    # These are the Lagrange form (bit-reversed evaluation) points
-    # Original ceremony files:
-    # - https://github.com/ethereum/kzg-ceremony-verifier/blob/master/output_setups/trusted_setup_4096.json
-    # - https://github.com/ethereum/c-kzg-4844/blob/v2.1.7/src/trusted_setup.txt
-    # On disk, G1 points are stored in natural order and will need bit-reversal
-    var bufG1Hex {.noInit.}: array[2*g1Bytes+1, char] # On MacOS, an extra byte seems to be needed for fscanf or AddressSanitizer complains
-    var bufG1bytes {.noInit.}: array[g1Bytes, byte]
-    var charsRead: cint
-    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-      let num_matches = f.c_fscanf(readHexG1, bufG1Hex.addr, charsRead.addr)
-      if num_matches != 1 or charsRead != 2*g1Bytes:
-        return tsInvalidFile
-      bufG1bytes.fromHex(bufG1Hex.toOpenArray(0, 2*g1Bytes-1))
-      let status = ctx.srs_lagrange_brp_g1.evals[i].deserialize_g1_compressed(bufG1bytes)
-      if status != cttCodecEcc_Success:
-        c_printf("[Constantine Trusted Setup] Invalid G1 point on line %d: CttCodecEccStatus code %d\n", cint(2+i), status)
-        return tsInvalidFile
+    block:
+      var num_matches: cint
+      var n: cuint
 
-  block:
-    # G2 points - 192 characters + newline
-    var bufG2Hex {.noInit.}: array[2*g2Bytes+1, char] # On MacOS, an extra byte seems to be needed for fscanf or AddressSanitizer complains
-    var bufG2bytes {.noInit.}: array[g2Bytes, byte]
-    var charsRead: cint
-    for i in 0 ..< KZG_SETUP_G2_LENGTH:
-      let num_matches = f.c_fscanf(readHexG2, bufG2Hex.addr, charsRead.addr)
-      if num_matches != 1 or charsRead != 2*g2Bytes:
-        return tsInvalidFile
-      bufG2bytes.fromHex(bufG2Hex.toOpenArray(0, 2*g2Bytes-1))
-      let status = ctx.srs_monomial_g2.coefs[i].deserialize_g2_compressed(bufG2bytes)
-      if status != cttCodecEcc_Success:
-        c_printf("[Constantine Trusted Setup] Invalid G2 point on line %d: CttCodecEccStatus code %d\n", cint(2+FIELD_ELEMENTS_PER_BLOB+i), status)
+      # G1 points metadata
+      num_matches = f.c_fscanf(parseInt32, n.addr)
+      if num_matches != 1 or n != FIELD_ELEMENTS_PER_BLOB:
         return tsInvalidFile
 
-  block:
-    # G1 points (Monomial form) - 96 characters + newline
-    # These are needed for FK20 multiproof computation (EIP-7594)
-    var bufG1Hex {.noInit.}: array[2*g1Bytes+1, char]
-    var bufG1bytes {.noInit.}: array[g1Bytes, byte]
-    var charsRead: cint
-    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-      let num_matches = f.c_fscanf(readHexG1, bufG1Hex.addr, charsRead.addr)
-      if num_matches != 1 or charsRead != 2*g1Bytes:
-        return tsInvalidFile
-      bufG1bytes.fromHex(bufG1Hex.toOpenArray(0, 2*g1Bytes-1))
-      let status = ctx.srs_monomial_g1.coefs[i].deserialize_g1_compressed(bufG1bytes)
-      if status != cttCodecEcc_Success:
-        c_printf("[Constantine Trusted Setup] Invalid G1 Monomial point on line %d: CttCodecEccStatus code %d\n", cint(2+FIELD_ELEMENTS_PER_BLOB+KZG_SETUP_G2_LENGTH+i), status)
+      # G2 points metadata
+      num_matches = f.c_fscanf(parseInt32, n.addr)
+      if num_matches != 1 or n != KZG_SETUP_G2_LENGTH:
         return tsInvalidFile
 
-  return tsSuccess
+    block:
+      # G1 points - 96 characters + newline, Lagrange form.
+      # Original ceremony files:
+      # - https://github.com/ethereum/kzg-ceremony-verifier/blob/master/output_setups/trusted_setup_4096.json
+      # - https://github.com/ethereum/c-kzg-4844/blob/v2.1.7/src/trusted_setup.txt
+      var bufG1Hex {.noInit.}: array[2*g1Bytes+1, char] # On MacOS, an extra byte seems to be needed for fscanf or AddressSanitizer complains
+      var charsRead: cint
+      for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+        let num_matches = f.c_fscanf(readHexG1, bufG1Hex.addr, charsRead.addr)
+        if num_matches != 1 or charsRead != 2*g1Bytes:
+          return tsInvalidFile
+        if ctx.deserializeLagrangeG1(i, bufG1Hex.toOpenArray(0, 2*g1Bytes-1)) != tsSuccess:
+          c_printf("[Constantine Trusted Setup] Invalid G1 point on line %d\n", cint(2+i))
+          return tsInvalidFile
+
+    block:
+      # G2 points - 192 characters + newline
+      var bufG2Hex {.noInit.}: array[2*g2Bytes+1, char] # On MacOS, an extra byte seems to be needed for fscanf or AddressSanitizer complains
+      var charsRead: cint
+      for i in 0 ..< KZG_SETUP_G2_LENGTH:
+        let num_matches = f.c_fscanf(readHexG2, bufG2Hex.addr, charsRead.addr)
+        if num_matches != 1 or charsRead != 2*g2Bytes:
+          return tsInvalidFile
+        if ctx.deserializeMonomialG2(i, bufG2Hex.toOpenArray(0, 2*g2Bytes-1)) != tsSuccess:
+          c_printf("[Constantine Trusted Setup] Invalid G2 point on line %d\n", cint(2+FIELD_ELEMENTS_PER_BLOB+i))
+          return tsInvalidFile
+
+    block:
+      # G1 points (Monomial form) - 96 characters + newline
+      # These are needed for FK20 multiproof computation (EIP-7594)
+      var bufG1Hex {.noInit.}: array[2*g1Bytes+1, char]
+      var charsRead: cint
+      for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+        let num_matches = f.c_fscanf(readHexG1, bufG1Hex.addr, charsRead.addr)
+        if num_matches != 1 or charsRead != 2*g1Bytes:
+          return tsInvalidFile
+        if ctx.deserializeMonomialG1(i, bufG1Hex.toOpenArray(0, 2*g1Bytes-1)) != tsSuccess:
+          c_printf("[Constantine Trusted Setup] Invalid G1 Monomial point on line %d\n", cint(2+FIELD_ELEMENTS_PER_BLOB+KZG_SETUP_G2_LENGTH+i))
+          return tsInvalidFile
+
+    return tsSuccess
 
 proc setupPolyphaseSpectrumBank(ctx: ptr EthereumKZGContext, t: int = 0, b: int = 0) =
   ## Build the polyphase spectrum bank from the SRS monomial points.
@@ -408,60 +424,118 @@ proc setupKzg7594PeerDAS(ctx: ptr EthereumKZGContext, t, b: int) =
 
   ctx.setupPolyphaseSpectrumBank(t, b)
 
-proc load_from_file(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t = 64, b = 12): TrustedSetupStatus =
-  ## Load from a trusted setup file.
+when not defined(standalone):
+  proc load_from_file(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t = 64, b = 12): TrustedSetupStatus =
+    ## Load from a trusted setup file.
 
-  var f: File
-  let ok = f.open(filepath, kRead)
-  if not ok:
-    return tsMissingOrInaccessibleFile
+    var f: File
+    let ok = f.open(filepath, kRead)
+    if not ok:
+      return tsMissingOrInaccessibleFile
 
+    ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
+
+    defer:
+      fileio.close(f)
+
+    let status = ctx.load_ckzg4844(f)
+    if status != tsSuccess:
+      freeHeapAligned(ctx)
+      ctx = nil
+    return status
+
+  proc new*(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new".} =
+    result = ctx.load_from_file(filepath, format)
+    if result == tsSuccess:
+      ctx.setupKzg4844ProtoDanksharding()
+      ctx.setupKzg7594PeerDAS(t=0, b=0)
+
+when not defined(standalone):
+  proc new_with_precompute*(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t, b: cint): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_with_precompute".} =
+    ## Create a KZG context with precomputed MSM tables for FK20 proofs (PeerDAS).
+    ##
+    ## `t` = base groups (stride between precomputed layers)
+    ## `b` = bits per window (window size = 2^b)
+    ##
+    ## SPEED / MEMORY TRADEOFF (PeerDAS, compute_cells_and_kzg_proofs = 128 MSMs of 64 points per blob):
+    ## - no precompute, 1.8 MiB total:        7.083 ops/s   ~141 ms/blob
+    ## - t= 64, b= 6, ~   32.2 MiB total:     8.724 ops/s   ~115 ms/blob
+    ## - t= 64, b= 8, ~   96.0 MiB total:     9.518 ops/s   ~105 ms/blob
+    ## - t= 64, b=10, ~  312.0 MiB total:    10.547 ops/s    ~95 ms/blob
+    ## - t= 64, b=12, ~ 1056.0 MiB total:    11.629 ops/s    ~86 ms/blob
+    ## - t=128, b= 6, ~   16.5 MiB total:     8.783 ops/s   ~114 ms/blob
+    ## - t=128, b= 8, ~   48.0 MiB total:     9.965 ops/s   ~100 ms/blob
+    ## - t=128, b=10, ~  156.0 MiB total:    10.561 ops/s    ~95 ms/blob
+    ## - t=128, b=12, ~  528.0 MiB total:    11.505 ops/s    ~87 ms/blob
+    ## - t=256, b= 6, ~    8.2 MiB total:     8.641 ops/s   ~116 ms/blob
+    ## - t=256, b= 8, ~   24.0 MiB total:    10.244 ops/s    ~98 ms/blob
+    ## - t=256, b=10, ~   84.0 MiB total:    10.281 ops/s    ~97 ms/blob
+    ## - t=256, b=12, ~  288.0 MiB total:    10.868 ops/s    ~92 ms/blob
+    ##
+    ## CPU: Intel i7-265K
+    ## Larger b = faster per MSM but exponentially more memory (2^b entries).
+    ## Larger t = fewer doublings but more precomputed layers.
+    ## Recommended (t=256, b=8): ~98 ms/blob proving, ~24 MiB total memory.
+    result = ctx.load_from_file(filepath, format)
+    if result == tsSuccess:
+      ctx.setupKzg4844ProtoDanksharding()
+      ctx.setupKzg7594PeerDAS(t, b)
+
+# Compile-time-embedded trusted setup
+# ------------------------------------------------------------
+#
+# Freestanding targets (e.g. zkVM guests) have no filesystem, so the SRS is baked
+# into the binary: the c-kzg-4844 reference file is read at Nim compile time and
+# parsed by fixed-width slicing. On disk G1 points take 96 hex chars + '\n' and
+# G2 points 192 + '\n' (the compressed encoding always sets the first bit, so
+# there are no omitted leading zeros) — one slice per point, no stdio.
+
+const kzgSetupEmbedded = staticRead("trusted_setup_ethereum_kzg4844_reference.dat")
+
+const
+  g1HexChars = 2*48   # 96 hex chars per compressed G1 point
+  g2HexChars = 2*96   # 192 hex chars per compressed G2 point
+  kzgHeaderLen = len("4096\n65\n")
+
+proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
+  if kzgSetupEmbedded.len != kzgHeaderLen +
+      FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1) +
+      KZG_SETUP_G2_LENGTH * (g2HexChars + 1) +
+      FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1):
+    return tsInvalidFile
+
+  template line(lo: int, hexChars: int): untyped =
+    kzgSetupEmbedded.toOpenArray(lo, lo + hexChars - 1)
+
+  var offset = kzgHeaderLen
+
+  for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+    if ctx.deserializeLagrangeG1(i, line(offset, g1HexChars)) != tsSuccess:
+      return tsInvalidFile
+    offset += g1HexChars + 1
+
+  for i in 0 ..< KZG_SETUP_G2_LENGTH:
+    if ctx.deserializeMonomialG2(i, line(offset, g2HexChars)) != tsSuccess:
+      return tsInvalidFile
+    offset += g2HexChars + 1
+
+  for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+    if ctx.deserializeMonomialG1(i, line(offset, g1HexChars)) != tsSuccess:
+      return tsInvalidFile
+    offset += g1HexChars + 1
+
+  tsSuccess
+
+proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
+  ## Create a KZG context from the trusted setup embedded at compile time.
   ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
-
-  defer:
-    fileio.close(f)
-
-  let status = ctx.load_ckzg4844(f)
-  if status != tsSuccess:
+  result = ctx.loadEmbedded()
+  if result != tsSuccess:
     freeHeapAligned(ctx)
     ctx = nil
-  return status
-
-proc new*(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new".} =
-  result = ctx.load_from_file(filepath, format)
-  if result == tsSuccess:
-    ctx.setupKzg4844ProtoDanksharding()
-    ctx.setupKzg7594PeerDAS(t=0, b=0)
-
-proc new_with_precompute*(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t, b: cint): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_with_precompute".} =
-  ## Create a KZG context with precomputed MSM tables for FK20 proofs (PeerDAS).
-  ##
-  ## `t` = base groups (stride between precomputed layers)
-  ## `b` = bits per window (window size = 2^b)
-  ##
-  ## SPEED / MEMORY TRADEOFF (PeerDAS, compute_cells_and_kzg_proofs = 128 MSMs of 64 points per blob):
-  ## - no precompute, 1.8 MiB total:        7.083 ops/s   ~141 ms/blob
-  ## - t= 64, b= 6, ~   32.2 MiB total:     8.724 ops/s   ~115 ms/blob
-  ## - t= 64, b= 8, ~   96.0 MiB total:     9.518 ops/s   ~105 ms/blob
-  ## - t= 64, b=10, ~  312.0 MiB total:    10.547 ops/s    ~95 ms/blob
-  ## - t= 64, b=12, ~ 1056.0 MiB total:    11.629 ops/s    ~86 ms/blob
-  ## - t=128, b= 6, ~   16.5 MiB total:     8.783 ops/s   ~114 ms/blob
-  ## - t=128, b= 8, ~   48.0 MiB total:     9.965 ops/s   ~100 ms/blob
-  ## - t=128, b=10, ~  156.0 MiB total:    10.561 ops/s    ~95 ms/blob
-  ## - t=128, b=12, ~  528.0 MiB total:    11.505 ops/s    ~87 ms/blob
-  ## - t=256, b= 6, ~    8.2 MiB total:     8.641 ops/s   ~116 ms/blob
-  ## - t=256, b= 8, ~   24.0 MiB total:    10.244 ops/s    ~98 ms/blob
-  ## - t=256, b=10, ~   84.0 MiB total:    10.281 ops/s    ~97 ms/blob
-  ## - t=256, b=12, ~  288.0 MiB total:    10.868 ops/s    ~92 ms/blob
-  ##
-  ## CPU: Intel i7-265K
-  ## Larger b = faster per MSM but exponentially more memory (2^b entries).
-  ## Larger t = fewer doublings but more precomputed layers.
-  ## Recommended (t=256, b=8): ~98 ms/blob proving, ~24 MiB total memory.
-  result = ctx.load_from_file(filepath, format)
-  if result == tsSuccess:
-    ctx.setupKzg4844ProtoDanksharding()
-    ctx.setupKzg7594PeerDAS(t, b)
+    return
+  ctx.setupKzg4844ProtoDanksharding()
+  ctx.setupKzg7594PeerDAS(t=0, b=0)
 
 proc delete*(ctx: ptr EthereumKZGContext) {.exportc: "ctt_eth_kzg_context_delete".} =
   # Not why but `=destroy`(ctx.polyphaseSpectrumBank)
