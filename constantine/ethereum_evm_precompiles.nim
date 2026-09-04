@@ -1374,15 +1374,90 @@ func eth_evm_ecrecover*(r: var openArray[byte],
 
   result = cttEVM_Success
 
-func eth_evm_secp256k1_verify*(r: var openArray[byte],
-                               input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
+func eth_zkvm_secp256k1_ecrecover*(r: var openArray[byte],
+                                   input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
+  ## Recover the secp256k1 public key from an ECDSA signature, returning the raw
+  ## affine coordinates.
+  ##
+  ## This is a zkVM-accelerator raw primitive (`eth_zkvm`, not an `eth_evm`
+  ## precompile), matching the zkvm-standards accelerator ABI shape: it returns
+  ## the recovered public key as `x ‖ y` (64 bytes) and leaves the
+  ## Keccak-then-truncate-to-address step to the caller (which an accelerator
+  ## typically provides separately). Unlike the EVM precompile form, the recovery
+  ## id is a single bare byte, not a 32-byte big-endian `v ∈ {0,1,27,28}`.
+  ##
+  ## Inputs:
+  ##   - `input`: 97 bytes, concatenation of
+  ##     - 32 byte: message digest (the `z` scalar, reduced mod the curve order)
+  ##     - 1 byte: recovery id, 0 (even `y`) or 1 (odd `y`)
+  ##     - 32 byte: signature `r` scalar
+  ##     - 32 byte: signature `s` scalar
+  ##   - `r`: 64-byte output, the recovered public key `x ‖ y` (big-endian)
+  ##
+  ## Output:
+  ## - status code:
+  ##   cttEVM_Success (`r` holds the recovered public key)
+  ##   cttEVM_InvalidInputSize
+  ##   cttEVM_InvalidOutputSize
+  ##   cttEVM_MalformedSignature (recovery id not in {0, 1}, a signature scalar
+  ##     is zero or >= the curve order, or no valid key exists for the signature)
+  if len(input) != 97:
+    return cttEVM_InvalidInputSize
+
+  if len(r) != 64:
+    return cttEVM_InvalidOutputSize
+
+  # 1. message digest as a scalar in `Fr[Secp256k1]` (reduced mod the order)
+  var msgBI {.noinit.}: BigInt[256]
+  msgBI.unmarshal(input.toOpenArray(0, 32-1), bigEndian)
+  var msgHash {.noinit.}: Fr[Secp256k1]
+  msgHash.fromBig(msgBI)
+
+  # 2. recovery id selects the y parity of the `R` point
+  let recid = input[32]
+  if recid notin [byte 0, 1]:
+    return cttEVM_MalformedSignature
+  let evenY = recid == 0
+
+  # 3. unmarshal signature scalars, rejecting non-canonical encodings. The raw
+  #    primitive requires r and s to be canonical scalars in [1, n-1]; all-zero
+  #    or >= the curve order is malformed (recoverPubkeyFromDigest would silently
+  #    reduce them mod n instead of rejecting).
+  var rSig {.noinit.}, sSig {.noinit.}: BigInt[256]
+  rSig.unmarshal(input.toOpenArray(33,  65-1), bigEndian)
+  sSig.unmarshal(input.toOpenArray(65,  97-1), bigEndian)
+  let n = Fr[Secp256k1].getModulus()
+  if bool(rSig.isZero()) or bool(sSig.isZero()) or
+     not bool(rSig < n) or not bool(sSig < n):
+    return cttEVM_MalformedSignature
+  var signature {.noinit.}: Signature
+  privateAccess(Signature)
+  signature.r = Fr[Secp256k1].fromBig(rSig)
+  signature.s = Fr[Secp256k1].fromBig(sSig)
+
+  # 4. recover the public key and marshal its affine coordinates. Recovery yields
+  #    the neutral point when no valid key exists for the signature (e.g. x = r
+  #    has no on-curve point); report that as a malformed signature rather than
+  #    returning the point at infinity as if it were a key.
+  var pubKey {.noinit.}: PublicKey
+  pubKey.recoverPubkeyFromDigest(msgHash, signature, evenY)
+  privateAccess(PublicKey)
+  if bool(pubKey.raw.isNeutral()):
+    return cttEVM_MalformedSignature
+  r.toOpenArray( 0, 32-1).marshal(pubKey.raw.x, bigEndian)
+  r.toOpenArray(32, 64-1).marshal(pubKey.raw.y, bigEndian)
+
+  result = cttEVM_Success
+
+func eth_zkvm_secp256k1_verify*(r: var openArray[byte],
+                                input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
   ## Verify an ECDSA signature over secp256k1 against a given public key.
   ##
-  ## This is NOT an Ethereum precompile (no EIP assigns an address to ECDSA
-  ## verification); it exposes the raw verify primitive for accelerator ABIs
-  ## that operate on the public key directly, complementing eth_evm_ecrecover
-  ## (which recovers a key). The message is a pre-hashed 32-byte digest, so no
-  ## hash function runs here.
+  ## This is a zkVM-accelerator raw primitive (`eth_zkvm`, not an `eth_evm`
+  ## precompile — no EIP assigns an address to ECDSA verification), matching the
+  ## zkvm-standards accelerator ABI shape. It operates on the public key directly,
+  ## complementing eth_zkvm_secp256k1_ecrecover (which recovers a key). The
+  ## message is a pre-hashed 32-byte digest, so no hash function runs here.
   ##
   ## Inputs:
   ##   - `input`: 160 bytes, big-endian concatenation of
