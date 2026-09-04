@@ -237,6 +237,15 @@ ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_with_precompute(
     int b
     ) __attribute__((__warn_unused_result__));
 
+/** Create a new KZG context from the trusted setup embedded at compile time.
+ *  Uses the EIP-4844 reference SRS baked into the binary (no filesystem access),
+ *  so it is the constructor usable in freestanding / bare-metal (zkVM guest)
+ *  builds. Sets the context to kNoPrecompute mode (~1.8 MiB).
+ */
+ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_embedded(
+    ctt_eth_kzg_context** ctx
+    ) __attribute__((__warn_unused_result__));
+
 /** Destroy a KZG context
  */
 void ctt_eth_kzg_context_delete(ctt_eth_kzg_context* ctx);

@@ -207,7 +207,9 @@ type
 # ############################################################
 
 template metrics(body: untyped): untyped =
-  when defined(CTT_THREADPOOL_METRICS):
+  # Under --os:standalone the stdio decls (c_printf/c_fflush/stdout) are gated
+  # out of fileio, so metrics output cannot be compiled; disable it there.
+  when defined(CTT_THREADPOOL_METRICS) and not defined(standalone):
     block: {.noSideEffect, gcsafe.}: body
 
 template incCounter(ctx: var WorkerContext, name: untyped{ident}, amount = 1) =
@@ -944,6 +946,13 @@ proc wait(scopedBarrier: ptr ScopedBarrier) {.raises:[], gcsafe.} =
 # ############################################################
 
 proc ctt_threadpool_new*(num_threads: cint): Threadpool {.libPrefix: "", raises: [ResourceExhaustedError].} =
+  when defined(standalone):
+    # Single-hart guest: only num_threads == 1 is supported. Reject anything
+    # larger up front instead of entering the worker-spawn loop, where
+    # createThread traps and never returns.
+    if num_threads != 1:
+      raise newException(ResourceExhaustedError,
+        "standalone (single-hart) threadpool supports exactly 1 thread, got " & $num_threads)
   type TpObj = typeof(default(Threadpool)[]) # due to C import, we need a dynamic sizeof
   let tp = allocHeapUncheckedAlignedPtr(Threadpool, sizeof(TpObj), alignment = 64)
   tp.barrier.init(numThreads)

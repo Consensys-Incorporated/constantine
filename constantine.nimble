@@ -355,11 +355,14 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec wrapper & " -c constantine/platforms/standalone_stdio.c" &
        " -o nimcache/libconstantine_riscv64_freestanding/standalone_stdio.riscv64.o"
   # Nim ran the host ar/ranlib, which clobbers a foreign-arch archive's index; rebuild
-  # the archive from the nimcache objects (+ the stdio object) with llvm-ar.
+  # the archive from the nimcache objects (+ the stdio object) with llvm-ar. Remove any
+  # prior archive first: ar only adds/replaces named members, so a stale object left in
+  # an existing archive (or a non-empty nimcache glob) would survive into the new one.
   let ar = if existsEnv"LLVM_AR": getEnv"LLVM_AR"
            elif fileExists"/opt/homebrew/opt/llvm/bin/llvm-ar": "/opt/homebrew/opt/llvm/bin/llvm-ar"
            elif fileExists"/usr/local/opt/llvm/bin/llvm-ar": "/usr/local/opt/llvm/bin/llvm-ar"
            else: "llvm-ar"
+  exec "rm -f lib/libconstantine.riscv64.a"
   exec ar & " rcs lib/libconstantine.riscv64.a" &
        " nimcache/libconstantine_riscv64_freestanding/*.o"
 

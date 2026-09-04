@@ -1,7 +1,7 @@
 # Standalone (bare-metal) futex shim for zkVM guest builds.
 # Single-threaded under --os:standalone: no OS futex primitive exists.
-# wait() spins on the word; with one worker there is never a cross-thread
-# waiter, so this reduces to a memory fence.
+# With one worker there is never a cross-thread waiter, so wait() reduces to
+# a memory fence (an acquire load) rather than a spin on the word.
 
 import std/atomics
 export MemoryOrder
@@ -26,8 +26,11 @@ proc increment*(futex: var Futex, value: uint32, order: MemoryOrder): uint32 {.i
   futex.value.fetchAdd(value, order)
 
 proc wait*(futex: var Futex, expected: uint32) {.inline.} =
-  while futex.value.load(moAcquire) == expected:
-    discard
+  # Single hart: there is never a cross-thread waiter, so blocking degenerates
+  # to a memory fence (an acquire load), not a spin — callers wrap wait() in
+  # their own retry loop, matching Linux/Windows block-once semantics.
+  discard expected
+  discard futex.value.load(moAcquire)
 
 proc wake*(futex: var Futex) {.inline.} =
   discard

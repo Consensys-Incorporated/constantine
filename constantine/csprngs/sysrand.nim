@@ -161,9 +161,13 @@ elif defined(standalone):
   # Constantine's Ethereum-facing code is for side-channel blinding; the
   # zkVM circuit guarantees integrity, so blinding is not required.
   proc sysrand*(buffer: pointer, len: csize_t): bool {.libPrefix: prefix_ffi.} =
-    ## Deterministic stub for freestanding guests (no OS CSPRNG).
-    zeroMem(buffer, len)
-    return true
+    ## Freestanding guests have no entropy source; report failure rather than
+    ## hand out zero-filled bytes as if they were secure. The buffer is still
+    ## zeroed so callers never observe uninitialized memory on the failure path.
+    ## Returning false keeps rejection-sampling loops (e.g. ECDSA nonce
+    ## generation) from spinning forever on a perpetually-zero sample.
+    zeroMem(buffer, Natural(len))
+    return false
 
 else:
   {.error: "The OS '" & $hostOS & "' has no CSPRNG configured."}
