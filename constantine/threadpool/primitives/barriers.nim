@@ -35,6 +35,9 @@ when defined(windows):
     ## and reuse of the barrier requires initialization.
     DeleteSynchronizationBarrier(syncBarrier.addr)
 
+elif defined(standalone):
+  import ./barriers_standalone
+  export barriers_standalone
 else:
   import ./barriers_posix
   when compileOption("assertions"):

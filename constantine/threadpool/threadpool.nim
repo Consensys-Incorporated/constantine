@@ -23,6 +23,9 @@ import
   ./parallel_offloading,
   ../platforms/[allocs, bithacks]
 
+when defined(standalone):
+  import ./primitives/threads_standalone
+
 import ../zoo_exports, dll_autoload
 
 export

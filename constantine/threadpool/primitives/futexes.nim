@@ -14,5 +14,8 @@ elif defined(windows):
 elif defined(osx):
   import ./futexes_macos
   export futexes_macos
+elif defined(standalone):
+  import ./futexes_standalone
+  export futexes_standalone
 else:
   {.error: "Futexes are not implemented for your OS".}

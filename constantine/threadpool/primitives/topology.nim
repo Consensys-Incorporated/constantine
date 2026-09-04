@@ -85,6 +85,8 @@ elif defined(windows):
   import ./topology_windows
 elif defined(linux):
   import ./topology_linux
+elif defined(standalone):
+  import ./topology_standalone
 else:
   {.error: "Unsupported OS: " & hostOS.}
 
@@ -105,6 +107,8 @@ proc getNumCoresPhysical*(): cint =
 
   elif defined(linux):
     queryNumPhysicalCoresLinux()
+  elif defined(standalone):
+    queryNumPhysicalCoresStandalone()
 
   else:
     {.error: "Unsupported CPU/OS configuration: " & hostCPU & "/" & hostOS.}
@@ -126,5 +130,7 @@ proc getNumThreadsOS*(): cint {.libExport:"ctt_cpu_get_num_threads_os".} =
     queryAvailableThreadsWindows()
   elif defined(linux):
     queryAvailableThreadsLinux()
+  elif defined(standalone):
+    queryAvailableThreadsStandalone()
   else:
     {.error: "Unsupported CPU/OS configuration: " & hostCPU & "/" & hostOS.}
