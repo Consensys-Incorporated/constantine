@@ -1474,6 +1474,7 @@ func eth_zkvm_secp256k1_verify*(r: var openArray[byte],
   ##   cttEVM_InvalidInputSize
   ##   cttEVM_InvalidOutputSize
   ##   cttEVM_IntLargerThanModulus / cttEVM_PointNotOnCurve (public key rejected)
+  ##   cttEVM_MalformedSignature (a signature scalar is zero or >= the curve order)
   if len(input) != 160:
     return cttEVM_InvalidInputSize
 
@@ -1507,11 +1508,18 @@ func eth_zkvm_secp256k1_verify*(r: var openArray[byte],
   msgHash.fromBig(msgBI)
 
   # 3. unmarshal signature scalars
+  # A scalar equal to zero or >= the curve order is malformed (Fr.fromBig would
+  # silently reduce it, and a zero scalar sends verification down a degenerate
+  # path the strict ECDSA contract rules out).
   var signature {.noinit.}: Signature
   privateAccess(Signature)
   var rSig {.noinit.}, sSig {.noinit.}: BigInt[256]
   rSig.unmarshal(input.toOpenArray( 96, 128-1), bigEndian)
   sSig.unmarshal(input.toOpenArray(128, 160-1), bigEndian)
+  let n = Fr[Secp256k1].getModulus()
+  if bool(rSig.isZero()) or bool(sSig.isZero()) or
+     not bool(rSig < n) or not bool(sSig < n):
+    return cttEVM_MalformedSignature
   signature.r = Fr[Secp256k1].fromBig(rSig)
   signature.s = Fr[Secp256k1].fromBig(sSig)
 
