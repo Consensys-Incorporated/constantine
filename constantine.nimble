@@ -346,7 +346,7 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec nim & " c " &
        releaseBuildOptions(bmStaticLib) &
        " --cc:clang " &
-       " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG " &
+       " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
        " --threads:on " &
        " --noMain --app:staticlib " &
@@ -365,6 +365,18 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec "rm -f lib/libconstantine.riscv64.a"
   exec ar & " rcs lib/libconstantine.riscv64.a" &
        " " & nimcache & "/*.o"
+
+task test_kzg_embedded_full, "Test the full embedded KZG profile":
+  exec "nim c -r -d:CTT_EMBEDDED_KZG " &
+       " --outdir:build/test_suite " &
+       " --nimcache:nimcache/tests/t_ethereum_kzg_embedded_full " &
+       " tests/t_ethereum_kzg_embedded_full.nim"
+
+task test_kzg_embedded_verification_only, "Test the verification-only embedded KZG profile":
+  exec "nim c -r -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
+       " --outdir:build/test_suite " &
+       " --nimcache:nimcache/tests/t_ethereum_evm_kzg_embedded " &
+       " tests/t_ethereum_evm_kzg_embedded.nim"
 
 task make_zkalc, "Build a benchmark executable for zkalc (with Clang)":
   exec "nim c --cc:clang " &

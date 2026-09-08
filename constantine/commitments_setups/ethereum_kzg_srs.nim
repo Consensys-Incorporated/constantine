@@ -7,6 +7,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 import
+  std/macros,
   constantine/named/algebras,
   constantine/math/[arithmetic, extension_fields],
   constantine/math/elliptic/[ec_shortweierstrass_affine, ec_shortweierstrass_jacobian, ec_shortweierstrass_batch_ops, ec_multi_scalar_mul_precomp],
@@ -22,6 +23,15 @@ import
 # C API prefix
 # -------------------
 import ../zoo_exports
+
+when defined(CTT_KZG_VERIFICATION_ONLY) and not defined(CTT_EMBEDDED_KZG):
+  {.error: "CTT_KZG_VERIFICATION_ONLY requires CTT_EMBEDDED_KZG".}
+
+macro fullKzgContext(procAst: untyped): untyped =
+  when defined(CTT_KZG_VERIFICATION_ONLY):
+    result = newStmtList()
+  else:
+    result = procAst
 
 # Roots of unity
 # ------------------------------------------------------------
@@ -164,7 +174,8 @@ type
 
     # Trusted setup, see https://vitalik.ca/general/2022/03/14/trustedsetup.html
 
-    srs_lagrange_brp_g1*{.align: 64.}: PolynomialEval[FIELD_ELEMENTS_PER_BLOB, EC_ShortW_Aff[Fp[BLS12_381], G1], kBitReversed]
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      srs_lagrange_brp_g1*{.align: 64.}: PolynomialEval[FIELD_ELEMENTS_PER_BLOB, EC_ShortW_Aff[Fp[BLS12_381], G1], kBitReversed]
     # Part of the Structured Reference String (SRS) holding the 𝔾1 points
     # Stored in bit-reversed evaluation / Lagrange form
     #
@@ -184,7 +195,8 @@ type
     #
     # Conversion can be done with a discrete Fourier transform. In EIP-4844 we operate only on the evaluation form of polynomials over 𝔾1 (i.e. the Lagrange basis)
 
-    srs_monomial_g1*{.align: 64.}: PolynomialCoef[FIELD_ELEMENTS_PER_BLOB, EC_ShortW_Aff[Fp[BLS12_381], G1]]
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      srs_monomial_g1*{.align: 64.}: PolynomialCoef[FIELD_ELEMENTS_PER_BLOB, EC_ShortW_Aff[Fp[BLS12_381], G1]]
     # Part of the Structured Reference String (SRS) holding the 𝔾1 points
     # Stores the powers of tau
     #   [G, [τ]G, [τ²]G, ... [τ⁴⁰⁹⁶]G]
@@ -192,7 +204,10 @@ type
     #
     # This is used in EIP-7594 to produce KZG multiproofs
 
-    srs_monomial_g2*{.align: 64.}: PolynomialCoef[KZG_SETUP_G2_LENGTH, EC_ShortW_Aff[Fp2[BLS12_381], G2]]
+    when defined(CTT_KZG_VERIFICATION_ONLY):
+      srs_monomial_g2*{.align: 64.}: PolynomialCoef[2, EC_ShortW_Aff[Fp2[BLS12_381], G2]]
+    else:
+      srs_monomial_g2*{.align: 64.}: PolynomialCoef[KZG_SETUP_G2_LENGTH, EC_ShortW_Aff[Fp2[BLS12_381], G2]]
     # Part of the SRS holding the 𝔾2 points
     #
     # Referring to the 𝔾2 generator as H, we store
@@ -204,19 +219,22 @@ type
     # For most schemes (Marlin, Plonk, Sonic, Ethereum's Deneb), only [τ]H is needed
     # but Ethereum's sharding will need 64 (65 with the generator H)
 
-    domain_brp*{.align: 64.}: PolyEvalRootsDomain[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381], kBitReversed]
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      domain_brp*{.align: 64.}: PolyEvalRootsDomain[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381], kBitReversed]
     # The domain field holds the roots of unity of the polynomial evaluation domain.
     # Important: for Ethereum, roots of unity are used in bit-reversed order
 
-    ecfft_desc_ext*{.align: 64.}: ECFFT_Descriptor[EC_ShortW_Jac[Fp[BLS12_381], G1]]
-    fft_desc_ext*{.align: 64.}: FrFFT_Descriptor[Fr[BLS12_381]]
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      ecfft_desc_ext*{.align: 64.}: ECFFT_Descriptor[EC_ShortW_Jac[Fp[BLS12_381], G1]]
+      fft_desc_ext*{.align: 64.}: FrFFT_Descriptor[Fr[BLS12_381]]
     # FFT descriptors are precomputed
     # They hold rootsOfUnity stored in natural order.
     #
     # The extended domain roots are stored in fft_desc_ext.rootsOfUnity
     # and can be accessed when needed (e.g., in recover functions).
 
-    polyphaseSpectrumBank*{.align: 64.}: PolyphaseSpectrumBank
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      polyphaseSpectrumBank*{.align: 64.}: PolyphaseSpectrumBank
     # Precomputed data for FK20 KZG multiproofs.
     # kPrecompute variant holds PrecomputedMSM tables (one per output position),
     # each table for MSM of size 64 (FIELD_ELEMENTS_PER_CELL).
@@ -244,7 +262,7 @@ type
 # these decode + deserialize into the context. No stdio.
 # On disk, G1 points are stored in natural order and are bit-reversed later by
 # setupKzg4844ProtoDanksharding.
-proc deserializeLagrangeG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
+proc deserializeLagrangeG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus {.fullKzgContext.} =
   var buf {.noInit.}: array[48, byte]
   buf.fromHex(hex)
   if ctx.srs_lagrange_brp_g1.evals[i].deserialize_g1_compressed(buf) != cttCodecEcc_Success:
@@ -258,7 +276,7 @@ proc deserializeMonomialG2(ctx: ptr EthereumKZGContext, i: int, hex: openArray[c
     return tsInvalidFile
   tsSuccess
 
-proc deserializeMonomialG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
+proc deserializeMonomialG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus {.fullKzgContext.} =
   var buf {.noInit.}: array[48, byte]
   buf.fromHex(hex)
   if ctx.srs_monomial_g1.coefs[i].deserialize_g1_compressed(buf) != cttCodecEcc_Success:
@@ -266,7 +284,7 @@ proc deserializeMonomialG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[c
   tsSuccess
 
 when not defined(standalone):
-  proc load_ckzg4844(ctx: ptr EthereumKZGContext, f: File): TrustedSetupStatus =
+  proc load_ckzg4844(ctx: ptr EthereumKZGContext, f: File): TrustedSetupStatus {.fullKzgContext.} =
     ## Read a trusted setup in the reference library c-kzg-4844 format
     # Format is the following (c-kzg-4844 with Monomial G1 for FK20):
     # <nG1: number of G1 points>
@@ -363,7 +381,7 @@ when not defined(standalone):
 
     return tsSuccess
 
-proc setupPolyphaseSpectrumBank(ctx: ptr EthereumKZGContext, t: int = 0, b: int = 0) =
+proc setupPolyphaseSpectrumBank(ctx: ptr EthereumKZGContext, t: int = 0, b: int = 0) {.fullKzgContext.} =
   ## Build the polyphase spectrum bank from the SRS monomial points.
   ## Use when the bank has been mutated in-place (e.g., benchmarking different
   ## precompute configs) and you need to restore it without reloading the full context.
@@ -392,7 +410,7 @@ proc setupPolyphaseSpectrumBank(ctx: ptr EthereumKZGContext, t: int = 0, b: int 
       for offset in 0 ..< FIELD_ELEMENTS_PER_CELL:
         ctx.polyphaseSpectrumBank.rawPoints[pos][offset] = tmp[offset][pos]
 
-proc setupKzg4844ProtoDanksharding(ctx: ptr EthereumKZGContext) =
+proc setupKzg4844ProtoDanksharding(ctx: ptr EthereumKZGContext) {.fullKzgContext.} =
   block:
     # Powers of tau: [G, [τ]G, [τ²]G, ... [τ⁴⁰⁹⁶]G]
 
@@ -409,7 +427,7 @@ proc setupKzg4844ProtoDanksharding(ctx: ptr EthereumKZGContext) =
     ctx.domain_brp.invMaxDegree.fromUint(ctx.domain_brp.rootsOfUnity.len.uint64)
     ctx.domain_brp.invMaxDegree.inv_vartime()
 
-proc setupKzg7594PeerDAS(ctx: ptr EthereumKZGContext, t, b: int) =
+proc setupKzg7594PeerDAS(ctx: ptr EthereumKZGContext, t, b: int) {.fullKzgContext.} =
   # Initialize FFT descriptors
   ctx.ecfft_desc_ext = ECFFT_Descriptor[EC_ShortW_Jac[Fp[BLS12_381], G1]].new(
     order = FIELD_ELEMENTS_PER_EXT_BLOB,
@@ -424,7 +442,7 @@ proc setupKzg7594PeerDAS(ctx: ptr EthereumKZGContext, t, b: int) =
 
   ctx.setupPolyphaseSpectrumBank(t, b)
 
-when not defined(standalone):
+when not defined(standalone) and not defined(CTT_KZG_VERIFICATION_ONLY):
   proc load_from_file(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t = 64, b = 12): TrustedSetupStatus =
     ## Load from a trusted setup file.
 
@@ -450,7 +468,7 @@ when not defined(standalone):
       ctx.setupKzg4844ProtoDanksharding()
       ctx.setupKzg7594PeerDAS(t=0, b=0)
 
-when not defined(standalone):
+when not defined(standalone) and not defined(CTT_KZG_VERIFICATION_ONLY):
   proc new_with_precompute*(ctx: var ptr EthereumKZGContext, filepath: cstring, format: TrustedSetupFormat, t, b: cint): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_with_precompute".} =
     ## Create a KZG context with precomputed MSM tables for FK20 proofs (PeerDAS).
     ##
@@ -484,37 +502,85 @@ when not defined(standalone):
 # Compile-time-embedded trusted setup
 # ------------------------------------------------------------
 #
-# EIP-4844 proof verification only needs the canonical ceremony point [tau]G2.
-# Embed that compressed point for freestanding targets without filesystem access.
+# Embedded trusted setup (opt-in via -d:CTT_EMBEDDED_KZG).
 when defined(CTT_EMBEDDED_KZG):
-  const embeddedTauG2Hex = "b5bfd7dd8cdeb128843bc287230af38926187075cbfbefa81009a2ce615ac53d2914e5870cb452d2afaaab24f3499f72185cbfee53492714734429b7b38608e23926c911cceceac9a36851477ba4c60b087041de621000edc98edada20c1def2"
+  when defined(CTT_KZG_VERIFICATION_ONLY):
+    # EIP-4844 proof verification only needs the canonical ceremony point [tau]G2.
+    const embeddedTauG2Hex = "b5bfd7dd8cdeb128843bc287230af38926187075cbfbefa81009a2ce615ac53d2914e5870cb452d2afaaab24f3499f72185cbfee53492714734429b7b38608e23926c911cceceac9a36851477ba4c60b087041de621000edc98edada20c1def2"
 
-  proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
-    var buf {.noInit.}: array[96, byte]
-    buf.fromHex(embeddedTauG2Hex)
-    if ctx.srs_monomial_g2.coefs[1].deserialize_g2_compressed(buf) != cttCodecEcc_Success:
-      return tsInvalidFile
-    tsSuccess
+    proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
+      ctx.deserializeMonomialG2(1, embeddedTauG2Hex)
+  else:
+    # The reference setup consists of fixed-width hexadecimal records with LF
+    # terminators, allowing allocation-free compile-time slicing.
+    const kzgSetupEmbedded = staticRead("trusted_setup_ethereum_kzg4844_reference.dat")
+
+    const
+      g1HexChars = 2*48   # 96 hex chars per compressed G1 point
+      g2HexChars = 2*96   # 192 hex chars per compressed G2 point
+      kzgHeaderLen = len("4096\n65\n")
+
+    proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
+      if kzgSetupEmbedded.len != kzgHeaderLen +
+          FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1) +
+          KZG_SETUP_G2_LENGTH * (g2HexChars + 1) +
+          FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1):
+        return tsInvalidFile
+      for i in 0 ..< kzgHeaderLen:
+        if kzgSetupEmbedded[i] != "4096\n65\n"[i]:
+          return tsInvalidFile
+
+      template line(lo: int, hexChars: int): untyped =
+        kzgSetupEmbedded.toOpenArray(lo, lo + hexChars - 1)
+
+      var offset = kzgHeaderLen
+
+      for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+        if kzgSetupEmbedded[offset + g1HexChars] != '\n':
+          return tsInvalidFile
+        if ctx.deserializeLagrangeG1(i, line(offset, g1HexChars)) != tsSuccess:
+          return tsInvalidFile
+        offset += g1HexChars + 1
+
+      for i in 0 ..< KZG_SETUP_G2_LENGTH:
+        if kzgSetupEmbedded[offset + g2HexChars] != '\n':
+          return tsInvalidFile
+        if ctx.deserializeMonomialG2(i, line(offset, g2HexChars)) != tsSuccess:
+          return tsInvalidFile
+        offset += g2HexChars + 1
+
+      for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
+        if kzgSetupEmbedded[offset + g1HexChars] != '\n':
+          return tsInvalidFile
+        if ctx.deserializeMonomialG1(i, line(offset, g1HexChars)) != tsSuccess:
+          return tsInvalidFile
+        offset += g1HexChars + 1
+
+      tsSuccess
 
   proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
-    ## Create a partially initialized KZG context containing [tau]G2.
-    ## Only available when built with -d:CTT_EMBEDDED_KZG.
+    ## Create a KZG context from the trusted setup embedded at compile time.
     ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
     result = ctx.loadEmbedded()
     if result != tsSuccess:
       freeHeapAligned(ctx)
       ctx = nil
+      return
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      ctx.setupKzg4844ProtoDanksharding()
+      ctx.setupKzg7594PeerDAS(t=0, b=0)
 
 proc delete*(ctx: ptr EthereumKZGContext) {.exportc: "ctt_eth_kzg_context_delete".} =
-  # Not why but `=destroy`(ctx.polyphaseSpectrumBank)
-  # can apparently raise
-  # but destroying the individual precomp MSM field cannot
   if not ctx.isNil:
-    case ctx.polyphaseSpectrumBank.kind
-    of kNoPrecompute: discard
-    of kPrecompute:
-      for i in 0 ..< CELLS_PER_EXT_BLOB:
-        `=destroy`(ctx.polyphaseSpectrumBank.precompPoints[i])
-    `=destroy`(ctx.ecfft_desc_ext)
-    `=destroy`(ctx.fft_desc_ext)
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      # Not why but `=destroy`(ctx.polyphaseSpectrumBank)
+      # can apparently raise
+      # but destroying the individual precomp MSM field cannot
+      case ctx.polyphaseSpectrumBank.kind
+      of kNoPrecompute: discard
+      of kPrecompute:
+        for i in 0 ..< CELLS_PER_EXT_BLOB:
+          `=destroy`(ctx.polyphaseSpectrumBank.precompPoints[i])
+      `=destroy`(ctx.ecfft_desc_ext)
+      `=destroy`(ctx.fft_desc_ext)
     freeHeapAligned(ctx)

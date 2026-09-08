@@ -29,7 +29,7 @@ import
 export EthereumKZGContext, TrustedSetupFormat, TrustedSetupStatus, delete
 when defined(CTT_EMBEDDED_KZG):
   export newEmbedded
-when not defined(standalone):
+when not defined(standalone) and not defined(CTT_KZG_VERIFICATION_ONLY):
   export new, new_with_precompute
 
 # Technically not a precompile but reexport hashes
