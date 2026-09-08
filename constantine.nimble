@@ -339,7 +339,9 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   ## freestanding stdio backing (stderr/fwrite/fflush/exit for the Nim runtime's OOM
   ## path) is compiled alongside and added to the archive.
   let wrapper = "constantine/platforms/clang-rv64-standalone.sh"
+  let nimcache = "nimcache/libconstantine_riscv64_freestanding"
   exec "chmod +x " & wrapper
+  exec "rm -rf " & nimcache
   let nim = if existsEnv"NIM": getEnv"NIM" else: "nim"
   exec nim & " c " &
        releaseBuildOptions(bmStaticLib) &
@@ -350,21 +352,19 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
        " --noMain --app:staticlib " &
        " --nimMainPrefix:ctt_init_ " &
        " --out:libconstantine.riscv64.a --outdir:lib " &
-       " --nimcache:nimcache/libconstantine_riscv64_freestanding " &
+       " --nimcache:" & nimcache & " " &
        " bindings/lib_constantine.nim"
   exec wrapper & " -c constantine/platforms/standalone_stdio.c" &
-       " -o nimcache/libconstantine_riscv64_freestanding/standalone_stdio.riscv64.o"
+       " -o " & nimcache & "/standalone_stdio.riscv64.o"
   # Nim ran the host ar/ranlib, which clobbers a foreign-arch archive's index; rebuild
-  # the archive from the nimcache objects (+ the stdio object) with llvm-ar. Remove any
-  # prior archive first: ar only adds/replaces named members, so a stale object left in
-  # an existing archive (or a non-empty nimcache glob) would survive into the new one.
+  # the archive from the fresh nimcache objects (+ the stdio object) with llvm-ar.
   let ar = if existsEnv"LLVM_AR": getEnv"LLVM_AR"
            elif fileExists"/opt/homebrew/opt/llvm/bin/llvm-ar": "/opt/homebrew/opt/llvm/bin/llvm-ar"
            elif fileExists"/usr/local/opt/llvm/bin/llvm-ar": "/usr/local/opt/llvm/bin/llvm-ar"
            else: "llvm-ar"
   exec "rm -f lib/libconstantine.riscv64.a"
   exec ar & " rcs lib/libconstantine.riscv64.a" &
-       " nimcache/libconstantine_riscv64_freestanding/*.o"
+       " " & nimcache & "/*.o"
 
 task make_zkalc, "Build a benchmark executable for zkalc (with Clang)":
   exec "nim c --cc:clang " &
