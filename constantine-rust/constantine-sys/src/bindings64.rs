@@ -4606,12 +4606,6 @@ pub struct ctt_eth_kzg_context_struct {
 pub type ctt_eth_kzg_context = ctt_eth_kzg_context_struct;
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct ctt_eth_kzg_verifier_context_struct {
-    _unused: [u8; 0],
-}
-pub type ctt_eth_kzg_verifier_context = ctt_eth_kzg_verifier_context_struct;
-#[repr(C)]
-#[derive(Copy, Clone)]
 pub struct ctt_eth_kzg_commitment {
     raw: [byte; 48usize],
 }
@@ -4783,15 +4777,6 @@ unsafe extern "C" {
         t: ::core::ffi::c_int,
         b: ::core::ffi::c_int,
     ) -> ctt_eth_trusted_setup_status;
-}
-unsafe extern "C" {
-    #[must_use]
-    pub fn ctt_eth_kzg_verifier_context_new_embedded(
-        ctx: *mut *mut ctt_eth_kzg_verifier_context,
-    ) -> ctt_eth_trusted_setup_status;
-}
-unsafe extern "C" {
-    pub fn ctt_eth_kzg_verifier_context_delete(ctx: *mut ctt_eth_kzg_verifier_context);
 }
 unsafe extern "C" {
     #[doc = " Destroy a KZG context"]
@@ -5076,16 +5061,6 @@ unsafe extern "C" {
     #[doc = "  EIP-4844 Blobs KZG point evaluation\n\n  Name: POINT_EVALUATION\n\n  Verify `p(z) = y` given commitment that corresponds to the polynomial `p(x)` and a KZG proof.\n\n  Input:\n  - versioned_hash | z | y | commitment | proof |\n  - The length MUST be 192 bytes with the following breakdown:\n    - 32 bytes, SHA256 versioned hash of the commitment VERSIONED_HASH_VERSION_KZG + sha256(commitment)[1:]\n      currently VERSIONED_HASH_VERSION_KZG is hardcoded at 0x01.\n    - 32 bytes, z a polynomial opening challenge\n    - 32 bytes, y the evaluation of the polynomial `p` at the challenge\n    - 48 bytes, C a commitment to the polynomial `p`\n    - 48 bytes, a succinct proof that allows verifying p(z) = y withut the full polynomial\n\n  Output\n  - Output buffer MUST be of length 64 bytes\n  - On success, returns:\n      - 32 bytes, the number of field elements per EIP-4844 blobs, encoded in big-endian\n      - 32 bytes, the 255-bit BLS12-381 scalar field modulus (i.e. curve order r), encoded in big endian\n  - Status code:\n    cttEVM_Success\n    cttEVM_InvalidInputSize\n    cttEVM_VerificationFailure\n\n  Spec https://eips.ethereum.org/EIPS/eip-4844"]
     pub fn ctt_eth_evm_kzg_point_evaluation(
         ctx: *const ctt_eth_kzg_context,
-        r: *mut byte,
-        r_len: usize,
-        inputs: *const byte,
-        inputs_len: usize,
-    ) -> ctt_evm_status;
-}
-unsafe extern "C" {
-    #[must_use]
-    pub fn ctt_eth_evm_kzg_point_evaluation_with_verifier_context(
-        ctx: *const ctt_eth_kzg_verifier_context,
         r: *mut byte,
         r_len: usize,
         inputs: *const byte,

@@ -23,10 +23,10 @@ import
 
 export
   delete,
-  TrustedSetupFormat, TrustedSetupStatus,
-  EthereumKZGContext, EthereumKZGVerifierContext,
-  FIELD_ELEMENTS_PER_BLOB,
-  newEmbedded
+  TrustedSetupFormat, TrustedSetupStatus, EthereumKZGContext,
+  FIELD_ELEMENTS_PER_BLOB
+when defined(CTT_EMBEDDED_KZG):
+  export newEmbedded
 when not defined(standalone):
   export new, new_with_precompute
 
@@ -381,12 +381,12 @@ func compute_kzg_proof*(
   freeHeapAligned(poly)
   return result
 
-func verify_kzg_proof_impl(
-       tauG2: EC_ShortW_Aff[Fp2[BLS12_381], G2],
+func verify_kzg_proof*(
+       ctx: ptr EthereumKZGContext,
        commitment_bytes: array[48, byte],
        z_bytes: array[32, byte],
        y_bytes: array[32, byte],
-       proof_bytes: array[48, byte]): cttEthKzgStatus {.tags:[Alloca, Vartime].} =
+       proof_bytes: array[48, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, Vartime].} =
   ## Verify KZG proof that p(z) == y where p(z) is the polynomial represented by "polynomial_kzg"
 
   var commitment {.noInit.}: KZGCommitment
@@ -404,27 +404,11 @@ func verify_kzg_proof_impl(
   let verif = kzg_verify(EC_ShortW_Aff[Fp[BLS12_381], G1](commitment),
                          opening_challenge, eval_at_challenge,
                          EC_ShortW_Aff[Fp[BLS12_381], G1](proof),
-                         tauG2)
+                         ctx.srs_monomial_g2.coefs[1])
   if verif:
     return cttEthKzg_Success
   else:
     return cttEthKzg_VerificationFailure
-
-func verify_kzg_proof*(
-       ctx: ptr EthereumKZGContext,
-       commitment_bytes: array[48, byte],
-       z_bytes: array[32, byte],
-       y_bytes: array[32, byte],
-       proof_bytes: array[48, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, Vartime].} =
-  verify_kzg_proof_impl(ctx.srs_monomial_g2.coefs[1], commitment_bytes, z_bytes, y_bytes, proof_bytes)
-
-func verify_kzg_proof*(
-       ctx: ptr EthereumKZGVerifierContext,
-       commitment_bytes: array[48, byte],
-       z_bytes: array[32, byte],
-       y_bytes: array[32, byte],
-       proof_bytes: array[48, byte]): cttEthKzgStatus {.tags:[Alloca, Vartime].} =
-  verify_kzg_proof_impl(ctx.tauG2, commitment_bytes, z_bytes, y_bytes, proof_bytes)
 
 func compute_blob_kzg_proof*(
        ctx: ptr EthereumKZGContext,

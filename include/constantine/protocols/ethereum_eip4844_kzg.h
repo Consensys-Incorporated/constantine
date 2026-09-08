@@ -19,7 +19,6 @@ extern "C" {
 // ------------------------------------------------------------------------------------------------
 
 typedef struct ctt_eth_kzg_context_struct ctt_eth_kzg_context;
-typedef struct ctt_eth_kzg_verifier_context_struct ctt_eth_kzg_verifier_context;
 
 typedef struct { byte raw[48]; }        ctt_eth_kzg_commitment;
 typedef struct { byte raw[48]; }        ctt_eth_kzg_proof;
@@ -238,16 +237,16 @@ ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_with_precompute(
     int b
     ) __attribute__((__warn_unused_result__));
 
-/** Create a minimal KZG verifier context from the embedded canonical [tau]G2
- *  ceremony point (no filesystem access). This is the constructor usable in
- *  freestanding / bare-metal (zkVM guest) builds.
+/** Create a partially initialized KZG context with only the canonical [tau]G2
+ *  ceremony point embedded and initialized (no filesystem access).
+ *
+ *  This context is valid only for ctt_eth_kzg_verify_kzg_proof and the KZG point
+ *  evaluation API. Other KZG APIs require a fully initialized context.
+ *  Only present when the library is built with -d:CTT_EMBEDDED_KZG.
  */
-ctt_eth_trusted_setup_status ctt_eth_kzg_verifier_context_new_embedded(
-    ctt_eth_kzg_verifier_context** ctx
+ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_embedded(
+    ctt_eth_kzg_context** ctx
     ) __attribute__((__warn_unused_result__));
-
-/** Destroy a minimal KZG verifier context. */
-void ctt_eth_kzg_verifier_context_delete(ctt_eth_kzg_verifier_context* ctx);
 
 /** Destroy a KZG context
  */

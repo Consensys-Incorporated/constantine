@@ -534,13 +534,6 @@ ctt_evm_status ctt_eth_evm_kzg_point_evaluation(
     const byte* inputs, size_t inputs_len
 ) __attribute__((warn_unused_result));
 
-/** Verifier-only variant of POINT_EVALUATION for the embedded [tau]G2 context. */
-ctt_evm_status ctt_eth_evm_kzg_point_evaluation_with_verifier_context(
-    const ctt_eth_kzg_verifier_context* ctx,
-    byte* r, size_t r_len,
-    const byte* inputs, size_t inputs_len
-) __attribute__((warn_unused_result));
-
 /**
  *  zkVM-accelerator raw primitive: ECDSA signature verification over secp256k1
  *  against a given public key (the eth_zkvm family follows the zkvm-standards

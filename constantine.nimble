@@ -346,7 +346,7 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec nim & " c " &
        releaseBuildOptions(bmStaticLib) &
        " --cc:clang " &
-       " --cpu:riscv64 --os:standalone -d:noSignalHandler " &
+       " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG " &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
        " --threads:on " &
        " --noMain --app:staticlib " &
@@ -673,7 +673,6 @@ const testDesc: seq[tuple[path: string, useGMP: bool]] = @[
   # ----------------------------------------------------------
   ("tests/t_ethereum_evm_modexp.nim", false),
   ("tests/t_ethereum_evm_precompiles.nim", false),
-  ("tests/t_ethereum_evm_kzg_embedded.nim", false),
   ("tests/t_ethereum_bls_signatures.nim", false),
   ("tests/t_ethereum_eip2333_bls12381_key_derivation.nim", false),
   ("tests/t_ethereum_eip4844_deneb_kzg.nim", false),

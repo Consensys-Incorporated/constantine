@@ -152,10 +152,6 @@ type
 #   are different from multiproofs
 
 type
-  EthereumKZGVerifierContext* = object
-    ## Minimal context for verifying EIP-4844 KZG proofs.
-    tauG2*: EC_ShortW_Aff[Fp2[BLS12_381], G2]
-
   EthereumKZGContext* = object
     ## KZG commitment context
 
@@ -243,8 +239,9 @@ type
   TrustedSetupFormat* = enum
     kReferenceCKzg4844
 
-# Point deserialization shared by the file and embedded loaders. Each caller
-# supplies hex strings; these decode and deserialize without stdio.
+# Point deserialization shared by the file loader (load_ckzg4844) and the
+# compile-time-embedded loader. Source-agnostic: each caller supplies hex strings;
+# these decode + deserialize into the context. No stdio.
 # On disk, G1 points are stored in natural order and are bit-reversed later by
 # setupKzg4844ProtoDanksharding.
 proc deserializeLagrangeG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
@@ -484,32 +481,29 @@ when not defined(standalone):
       ctx.setupKzg4844ProtoDanksharding()
       ctx.setupKzg7594PeerDAS(t, b)
 
-# Embedded verifier setup
+# Compile-time-embedded trusted setup
 # ------------------------------------------------------------
 #
-# Freestanding targets (e.g. zkVM guests) have no filesystem. EIP-4844 proof
-# verification only needs the canonical ceremony point [tau]G2, embedded here in
-# compressed form.
-const embeddedTauG2Hex = "b5bfd7dd8cdeb128843bc287230af38926187075cbfbefa81009a2ce615ac53d2914e5870cb452d2afaaab24f3499f72185cbfee53492714734429b7b38608e23926c911cceceac9a36851477ba4c60b087041de621000edc98edada20c1def2"
+# EIP-4844 proof verification only needs the canonical ceremony point [tau]G2.
+# Embed that compressed point for freestanding targets without filesystem access.
+when defined(CTT_EMBEDDED_KZG):
+  const embeddedTauG2Hex = "b5bfd7dd8cdeb128843bc287230af38926187075cbfbefa81009a2ce615ac53d2914e5870cb452d2afaaab24f3499f72185cbfee53492714734429b7b38608e23926c911cceceac9a36851477ba4c60b087041de621000edc98edada20c1def2"
 
-proc loadEmbedded(ctx: ptr EthereumKZGVerifierContext): TrustedSetupStatus =
-  var buf {.noInit.}: array[96, byte]
-  buf.fromHex(embeddedTauG2Hex)
-  if ctx.tauG2.deserialize_g2_compressed(buf) != cttCodecEcc_Success:
-    return tsInvalidFile
-  tsSuccess
+  proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
+    var buf {.noInit.}: array[96, byte]
+    buf.fromHex(embeddedTauG2Hex)
+    if ctx.srs_monomial_g2.coefs[1].deserialize_g2_compressed(buf) != cttCodecEcc_Success:
+      return tsInvalidFile
+    tsSuccess
 
-proc newEmbedded*(ctx: var ptr EthereumKZGVerifierContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_verifier_context_new_embedded", used.} =
-  ## Create a minimal KZG verifier context from the embedded [tau]G2 point.
-  ctx = alloc0Heap(EthereumKZGVerifierContext)
-  result = ctx.loadEmbedded()
-  if result != tsSuccess:
-    freeHeap(ctx)
-    ctx = nil
-
-proc delete*(ctx: ptr EthereumKZGVerifierContext) {.exportc: "ctt_eth_kzg_verifier_context_delete".} =
-  if not ctx.isNil:
-    freeHeap(ctx)
+  proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
+    ## Create a partially initialized KZG context containing [tau]G2.
+    ## Only available when built with -d:CTT_EMBEDDED_KZG.
+    ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
+    result = ctx.loadEmbedded()
+    if result != tsSuccess:
+      freeHeapAligned(ctx)
+      ctx = nil
 
 proc delete*(ctx: ptr EthereumKZGContext) {.exportc: "ctt_eth_kzg_context_delete".} =
   # Not why but `=destroy`(ctx.polyphaseSpectrumBank)

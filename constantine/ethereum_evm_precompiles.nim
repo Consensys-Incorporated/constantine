@@ -26,8 +26,9 @@ import
   ./ethereum_ecdsa_signatures
 
 # For KZG point precompile
-export EthereumKZGContext, EthereumKZGVerifierContext,
-       TrustedSetupFormat, TrustedSetupStatus, delete, newEmbedded
+export EthereumKZGContext, TrustedSetupFormat, TrustedSetupStatus, delete
+when defined(CTT_EMBEDDED_KZG):
+  export newEmbedded
 when not defined(standalone):
   export new, new_with_precompute
 
@@ -1254,9 +1255,9 @@ proc kzg_to_versioned_hash(r: var array[32, byte], commitment_bytes: array[48, b
   s.finish(r)
   r[0] = VERSIONED_HASH_VERSION_KZG
 
-func eth_evm_kzg_point_evaluation_impl(ctx: ptr (EthereumKZGContext or EthereumKZGVerifierContext),
-                                      r: var openArray[byte],
-                                      input: openArray[byte]): CttEVMStatus =
+func eth_evm_kzg_point_evaluation*(ctx: ptr EthereumKZGContext,
+                                   r: var openArray[byte],
+                                   input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
   ## Verify `p(z) = y` given commitment that corresponds to the polynomial `p(x)` and a KZG proof.
   ## Also verify that the provided commitment matches the provided versioned_hash.
   ## Returns `FIELD_ELEMENTS_PER_BLOB` and the BSL12-381 modulus as padded 32 byte big endian values,
@@ -1297,16 +1298,6 @@ func eth_evm_kzg_point_evaluation_impl(ctx: ptr (EthereumKZGContext or EthereumK
   r.toOpenArray(32, 64-1).marshal(Fr[BLS12_381].getModulus(), bigEndian)
 
   result = cttEVM_Success
-
-func eth_evm_kzg_point_evaluation*(ctx: ptr EthereumKZGContext,
-                                   r: var openArray[byte],
-                                   input: openArray[byte]): CttEVMStatus {.libPrefix: prefix_ffi, meter.} =
-  eth_evm_kzg_point_evaluation_impl(ctx, r, input)
-
-func eth_evm_kzg_point_evaluation_with_verifier_context*(ctx: ptr EthereumKZGVerifierContext,
-                                                         r: var openArray[byte],
-                                                         input: openArray[byte]): CttEVMStatus {.exportc: "ctt_eth_evm_kzg_point_evaluation_with_verifier_context", meter.} =
-  eth_evm_kzg_point_evaluation_impl(ctx, r, input)
 
 import std / importutils # Alternatively make `r`, `s` visible or define setter or constructor
 func eth_evm_ecrecover*(r: var openArray[byte],
