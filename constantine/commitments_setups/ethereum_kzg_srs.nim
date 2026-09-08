@@ -152,6 +152,10 @@ type
 #   are different from multiproofs
 
 type
+  EthereumKZGVerifierContext* = object
+    ## Minimal context for verifying EIP-4844 KZG proofs.
+    tauG2*: EC_ShortW_Aff[Fp2[BLS12_381], G2]
+
   EthereumKZGContext* = object
     ## KZG commitment context
 
@@ -239,9 +243,8 @@ type
   TrustedSetupFormat* = enum
     kReferenceCKzg4844
 
-# Point deserialization shared by the file loader (load_ckzg4844) and the
-# compile-time-embedded loader (ethereum_kzg_srs_embedded.nim). Source-agnostic: each
-# caller supplies hex strings; these decode + deserialize into the context. No stdio.
+# Point deserialization shared by the file and embedded loaders. Each caller
+# supplies hex strings; these decode and deserialize without stdio.
 # On disk, G1 points are stored in natural order and are bit-reversed later by
 # setupKzg4844ProtoDanksharding.
 proc deserializeLagrangeG1(ctx: ptr EthereumKZGContext, i: int, hex: openArray[char]): TrustedSetupStatus =
@@ -481,68 +484,32 @@ when not defined(standalone):
       ctx.setupKzg4844ProtoDanksharding()
       ctx.setupKzg7594PeerDAS(t, b)
 
-# Compile-time-embedded trusted setup
+# Embedded verifier setup
 # ------------------------------------------------------------
 #
-# Freestanding targets (e.g. zkVM guests) have no filesystem, so the SRS is baked
-# into the binary: the c-kzg-4844 reference file is read at Nim compile time and
-# parsed by fixed-width slicing. On disk G1 points take 96 hex chars + '\n' and
-# G2 points 192 + '\n' (the compressed encoding always sets the first bit, so
-# there are no omitted leading zeros) — one slice per point, no stdio.
+# Freestanding targets (e.g. zkVM guests) have no filesystem. EIP-4844 proof
+# verification only needs the canonical ceremony point [tau]G2, embedded here in
+# compressed form.
+const embeddedTauG2Hex = "b5bfd7dd8cdeb128843bc287230af38926187075cbfbefa81009a2ce615ac53d2914e5870cb452d2afaaab24f3499f72185cbfee53492714734429b7b38608e23926c911cceceac9a36851477ba4c60b087041de621000edc98edada20c1def2"
 
-# Embedded trusted setup (opt-in via -d:CTT_EMBEDDED_KZG).
-# staticRead bakes the ~807KB reference setup into the binary; the guest build
-# defines CTT_EMBEDDED_KZG, hosts that load from a file leave it undefined so
-# their binaries stay lean. Nim does not evaluate staticRead in a dead branch,
-# so undefined builds skip the read entirely.
-when defined(CTT_EMBEDDED_KZG):
-  const kzgSetupEmbedded = staticRead("trusted_setup_ethereum_kzg4844_reference.dat")
+proc loadEmbedded(ctx: ptr EthereumKZGVerifierContext): TrustedSetupStatus =
+  var buf {.noInit.}: array[96, byte]
+  buf.fromHex(embeddedTauG2Hex)
+  if ctx.tauG2.deserialize_g2_compressed(buf) != cttCodecEcc_Success:
+    return tsInvalidFile
+  tsSuccess
 
-  const
-    g1HexChars = 2*48   # 96 hex chars per compressed G1 point
-    g2HexChars = 2*96   # 192 hex chars per compressed G2 point
-    kzgHeaderLen = len("4096\n65\n")
+proc newEmbedded*(ctx: var ptr EthereumKZGVerifierContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_verifier_context_new_embedded", used.} =
+  ## Create a minimal KZG verifier context from the embedded [tau]G2 point.
+  ctx = alloc0Heap(EthereumKZGVerifierContext)
+  result = ctx.loadEmbedded()
+  if result != tsSuccess:
+    freeHeap(ctx)
+    ctx = nil
 
-  proc loadEmbedded(ctx: ptr EthereumKZGContext): TrustedSetupStatus =
-    if kzgSetupEmbedded.len != kzgHeaderLen +
-        FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1) +
-        KZG_SETUP_G2_LENGTH * (g2HexChars + 1) +
-        FIELD_ELEMENTS_PER_BLOB * (g1HexChars + 1):
-      return tsInvalidFile
-
-    template line(lo: int, hexChars: int): untyped =
-      kzgSetupEmbedded.toOpenArray(lo, lo + hexChars - 1)
-
-    var offset = kzgHeaderLen
-
-    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-      if ctx.deserializeLagrangeG1(i, line(offset, g1HexChars)) != tsSuccess:
-        return tsInvalidFile
-      offset += g1HexChars + 1
-
-    for i in 0 ..< KZG_SETUP_G2_LENGTH:
-      if ctx.deserializeMonomialG2(i, line(offset, g2HexChars)) != tsSuccess:
-        return tsInvalidFile
-      offset += g2HexChars + 1
-
-    for i in 0 ..< FIELD_ELEMENTS_PER_BLOB:
-      if ctx.deserializeMonomialG1(i, line(offset, g1HexChars)) != tsSuccess:
-        return tsInvalidFile
-      offset += g1HexChars + 1
-
-    tsSuccess
-
-  proc newEmbedded*(ctx: var ptr EthereumKZGContext): TrustedSetupStatus {.exportc: "ctt_eth_kzg_context_new_embedded", used.} =
-    ## Create a KZG context from the trusted setup embedded at compile time.
-    ## Only available when built with -d:CTT_EMBEDDED_KZG.
-    ctx = alloc0HeapAligned(EthereumKZGContext, alignment = 64)
-    result = ctx.loadEmbedded()
-    if result != tsSuccess:
-      freeHeapAligned(ctx)
-      ctx = nil
-      return
-    ctx.setupKzg4844ProtoDanksharding()
-    ctx.setupKzg7594PeerDAS(t=0, b=0)
+proc delete*(ctx: ptr EthereumKZGVerifierContext) {.exportc: "ctt_eth_kzg_verifier_context_delete".} =
+  if not ctx.isNil:
+    freeHeap(ctx)
 
 proc delete*(ctx: ptr EthereumKZGContext) {.exportc: "ctt_eth_kzg_context_delete".} =
   # Not why but `=destroy`(ctx.polyphaseSpectrumBank)

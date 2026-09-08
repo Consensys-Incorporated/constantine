@@ -19,6 +19,7 @@ extern "C" {
 // ------------------------------------------------------------------------------------------------
 
 typedef struct ctt_eth_kzg_context_struct ctt_eth_kzg_context;
+typedef struct ctt_eth_kzg_verifier_context_struct ctt_eth_kzg_verifier_context;
 
 typedef struct { byte raw[48]; }        ctt_eth_kzg_commitment;
 typedef struct { byte raw[48]; }        ctt_eth_kzg_proof;
@@ -237,18 +238,16 @@ ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_with_precompute(
     int b
     ) __attribute__((__warn_unused_result__));
 
-/** Create a new KZG context from the trusted setup embedded at compile time.
- *  Uses the EIP-4844 reference SRS baked into the binary (no filesystem access),
- *  so it is the constructor usable in freestanding / bare-metal (zkVM guest)
- *  builds. Sets the context to kNoPrecompute mode (~1.8 MiB).
- *
- *  Only present when the library is built with -d:CTT_EMBEDDED_KZG; that define
- *  bakes the ~807KB reference SRS into the binary, so file-loading builds leave
- *  it undefined and do not export this symbol.
+/** Create a minimal KZG verifier context from the embedded canonical [tau]G2
+ *  ceremony point (no filesystem access). This is the constructor usable in
+ *  freestanding / bare-metal (zkVM guest) builds.
  */
-ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_embedded(
-    ctt_eth_kzg_context** ctx
+ctt_eth_trusted_setup_status ctt_eth_kzg_verifier_context_new_embedded(
+    ctt_eth_kzg_verifier_context** ctx
     ) __attribute__((__warn_unused_result__));
+
+/** Destroy a minimal KZG verifier context. */
+void ctt_eth_kzg_verifier_context_delete(ctt_eth_kzg_verifier_context* ctx);
 
 /** Destroy a KZG context
  */
