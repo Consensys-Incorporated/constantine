@@ -938,6 +938,14 @@ proc addTestSet(cmdFile: var string, requireGMP: bool) =
 
       cmdFile.testBatch(flags, td.path)
 
+proc addEmbeddedKzgTests(cmdFile: var string) =
+  cmdFile.testBatch(
+    " -d:CTT_EMBEDDED_KZG ",
+    "tests/t_ethereum_kzg_embedded_full.nim")
+  cmdFile.testBatch(
+    " -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY ",
+    "tests/t_ethereum_evm_kzg_embedded.nim")
+
 proc addTestSetNvidia(cmdFile: var string) =
   if not dirExists "build":
     mkDir "build"
@@ -1023,6 +1031,7 @@ task test_parallel, "Run all tests in parallel":
 
   var cmdFile: string
   cmdFile.addTestSet(requireGMP = true)
+  cmdFile.addEmbeddedKzgTests()
   cmdFile.addBenchSet()    # Build (but don't run) benches to ensure they stay relevant
   writeFile(buildParallel, cmdFile)
   exec "build/test_suite/pararun " & buildParallel
@@ -1042,6 +1051,7 @@ task test_parallel_no_gmp, "Run in parallel tests that don't require GMP":
 
   var cmdFile: string
   cmdFile.addTestSet(requireGMP = false)
+  cmdFile.addEmbeddedKzgTests()
   cmdFile.addBenchSet()    # Build (but don't run) benches to ensure they stay relevant
   writeFile(buildParallel, cmdFile)
   exec "build/test_suite/pararun " & buildParallel
