@@ -1,13 +1,12 @@
-# Standalone (bare-metal) panic hook for zkVM guest builds. Included by
-# lib_constantine.nim under --os:standalone. There is no OS to abort() into;
-# a panic is a guest bug, so trap in place. The procs are compilerprocs so
-# they override the Nim runtime's default panic/rawoutput symbols.
+# Standalone panic hook for bare-metal guest builds. A panic traps in place.
+# The compilerprocs replace the Nim runtime's default panic/output path.
 {.push stack_trace: off, profiler: off.}
 
-proc rawoutput(s: string) {.compilerproc.} =
+proc rawoutput(s: string) {.compilerproc, codegenDecl: "static $# $#$#".} =
   discard
 
-proc panic(s: string) {.noreturn, compilerproc.} =
+proc panic(s: string) {.noreturn, compilerproc,
+    codegenDecl: "static $# $#$#".} =
   rawoutput(s)
   while true:
     discard

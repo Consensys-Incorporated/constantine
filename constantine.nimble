@@ -348,12 +348,12 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
        " --cc:clang " &
        " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
-       " --threads:on " &
+       " --threads:off " &
        " --noMain --app:staticlib " &
        " --nimMainPrefix:ctt_init_ " &
        " --out:libconstantine.riscv64.a --outdir:lib " &
        " --nimcache:" & nimcache & " " &
-       " bindings/lib_constantine.nim"
+       " bindings/lib_constantine_riscv64_freestanding.nim"
   exec wrapper & " -c constantine/platforms/standalone_stdio.c" &
        " -o " & nimcache & "/standalone_stdio.riscv64.o"
   # Nim ran the host ar/ranlib, which clobbers a foreign-arch archive's index; rebuild
@@ -365,6 +365,12 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   exec "rm -f lib/libconstantine.riscv64.a"
   exec ar & " rcs lib/libconstantine.riscv64.a" &
        " " & nimcache & "/*.o"
+  let nm = if existsEnv"LLVM_NM": getEnv"LLVM_NM"
+           elif fileExists"/opt/homebrew/opt/llvm/bin/llvm-nm": "/opt/homebrew/opt/llvm/bin/llvm-nm"
+           elif fileExists"/usr/local/opt/llvm/bin/llvm-nm": "/usr/local/opt/llvm/bin/llvm-nm"
+           else: "llvm-nm"
+  exec "sh tests/check_riscv64_freestanding_archive.sh " & nm &
+       " lib/libconstantine.riscv64.a"
 
 task test_kzg_embedded_full, "Test the full embedded KZG profile":
   exec "nim c -r -d:CTT_EMBEDDED_KZG " &

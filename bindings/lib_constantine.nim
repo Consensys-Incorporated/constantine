@@ -14,10 +14,6 @@
 
 {.push warning[UnusedImport]: off.}
 
-when defined(standalone):
-  # Bare-metal guest: override the runtime panic path (no OS abort()).
-  include ./panicoverride
-
 import
   constantine/threadpool,
   ./lib_hashes,
