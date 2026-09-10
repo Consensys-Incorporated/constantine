@@ -7,8 +7,10 @@
 set -e
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 if [ -z "${CLANG:-}" ]; then
-  BREW_LLVM=$(brew --prefix llvm 2>/dev/null || true)
-  CLANG=${BREW_LLVM:+$BREW_LLVM/bin/clang}
+  if [ "$(uname -s)" = "Darwin" ]; then
+    BREW_LLVM=$(brew --prefix llvm 2>/dev/null || true)
+    CLANG=${BREW_LLVM:+$BREW_LLVM/bin/clang}
+  fi
   CLANG=${CLANG:-clang}
 fi
 # shellcheck disable=SC2086
