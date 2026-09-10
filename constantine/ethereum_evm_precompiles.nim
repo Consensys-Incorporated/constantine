@@ -585,7 +585,6 @@ func eth_evm_bn254_ecpairingcheck*(
 
   var acc {.noInit.}: MillerAccumulator[Fp[BN254_Snarks], Fp2[BN254_Snarks], Fp12[BN254_Snarks]]
   acc.init()
-  var foundInfinity = false
 
   for i in 0 ..< N:
     let pos = i*192
@@ -610,14 +609,8 @@ func eth_evm_bn254_ecpairingcheck*(
     if statusQ != cttEVM_Success:
       return statusQ
 
-    let regular = acc.update(P, Q)
-    if not regular:
-      foundInfinity = true
-
-  if foundInfinity: # pairing with infinity returns 1, hence no need to compute the following
-    zeroMem(r[0].addr, r.len-1)
-    r[r.len-1] = byte 1
-    return cttEVM_Success
+    # acc.update skips the update if P or Q are infinity point.
+    discard acc.update(P, Q)
 
   var gt {.noinit.}: Fp12[BN254_Snarks]
   acc.finish(gt)
