@@ -8,17 +8,14 @@
 
 import
   # Standard library
-  std/[os, strutils, importutils],
+  std/[os, strutils],
   # 3rd party
   pkg/jsony,
   # Internals
   constantine/serialization/codecs,
   constantine/ethereum_evm_precompiles,
-  constantine/ethereum_ecdsa_signatures,
-  constantine/named/algebras,
-  constantine/hashes,
-  constantine/math/arithmetic/[bigints, finite_fields],
-  constantine/math/io/[io_bigints, io_fields],
+  constantine/math/arithmetic/bigints,
+  constantine/math/io/io_bigints,
   constantine/platforms/abstractions
 
 # Test vector source:
@@ -164,94 +161,10 @@ proc testRipemd160() =
 
   stdout.write "Success\n"
 
-proc testZkvmSecp256k1() =
-  privateAccess(SecretKey)
-  privateAccess(PublicKey)
-  privateAccess(Signature)
-
-  var secretKey {.noinit.}: SecretKey
-  secretKey.raw = Fr[Secp256k1].fromInt(1)
-  var publicKey {.noinit.}: PublicKey
-  publicKey.derive_pubkey(secretKey)
-
-  let message = "Constantine zkVM secp256k1 ABI"
-  var signature {.noinit.}: Signature
-  signature.sign(secretKey, message.toOpenArrayByte(0, message.high), nsRfc6979)
-
-  var digest {.noinit.}: array[32, byte]
-  keccak256.hash(digest, message.toOpenArrayByte(0, message.high))
-  var pubkeyBytes {.noinit.}: array[64, byte]
-  pubkeyBytes.toOpenArray(0, 31).marshal(publicKey.raw.x.toBig(), bigEndian)
-  pubkeyBytes.toOpenArray(32, 63).marshal(publicKey.raw.y.toBig(), bigEndian)
-  var signatureBytes {.noinit.}: array[64, byte]
-  signatureBytes.toOpenArray(0, 31).marshal(signature.r.toBig(), bigEndian)
-  signatureBytes.toOpenArray(32, 63).marshal(signature.s.toBig(), bigEndian)
-
-  var recoveryInput {.noinit.}: array[97, byte]
-  recoveryInput.toOpenArray(0, 31).rawCopy(0, digest, 0, 32)
-  recoveryInput.toOpenArray(33, 96).rawCopy(0, signatureBytes, 0, 64)
-  var recovered {.noinit.}: array[64, byte]
-  var recoveredKey: array[64, byte]
-  var successfulRecoveries = 0
-  for recid in 0'u8 .. 1'u8:
-    recoveryInput[32] = recid
-    let status = eth_zkvm_secp256k1_ecrecover(recovered, recoveryInput)
-    if status == cttEVM_Success:
-      inc successfulRecoveries
-      if recovered == pubkeyBytes:
-        recoveredKey = recovered
-  doAssert successfulRecoveries == 2
-  doAssert recoveredKey == pubkeyBytes
-
-  var verifyInput {.noinit.}: array[160, byte]
-  verifyInput.toOpenArray(0, 31).rawCopy(0, digest, 0, 32)
-  verifyInput.toOpenArray(32, 95).rawCopy(0, recoveredKey, 0, 64)
-  verifyInput.toOpenArray(96, 159).rawCopy(0, signatureBytes, 0, 64)
-  var verified: array[1, byte]
-  doAssert eth_zkvm_secp256k1_verify(verified, verifyInput) == cttEVM_Success
-  doAssert verified[0] == 1
-
-  recoveryInput[32] = 2
-  doAssert eth_zkvm_secp256k1_ecrecover(recovered, recoveryInput) == cttEVM_MalformedSignature
-
-  var order {.noinit.}: array[32, byte]
-  order.marshal(Fr[Secp256k1].getModulus(), bigEndian)
-  for offset in [33, 65]:
-    var invalidRecoveryInput = recoveryInput
-    invalidRecoveryInput[32] = 0
-    invalidRecoveryInput.toOpenArray(offset, offset + 31).setZero()
-    doAssert eth_zkvm_secp256k1_ecrecover(recovered, invalidRecoveryInput) == cttEVM_MalformedSignature
-    invalidRecoveryInput = recoveryInput
-    invalidRecoveryInput[32] = 0
-    invalidRecoveryInput.toOpenArray(offset, offset + 31).rawCopy(0, order, 0, 32)
-    doAssert eth_zkvm_secp256k1_ecrecover(recovered, invalidRecoveryInput) == cttEVM_MalformedSignature
-
-  for offset in [96, 128]:
-    var invalidVerifyInput = verifyInput
-    invalidVerifyInput.toOpenArray(offset, offset + 31).setZero()
-    doAssert eth_zkvm_secp256k1_verify(verified, invalidVerifyInput) == cttEVM_MalformedSignature
-    invalidVerifyInput = verifyInput
-    invalidVerifyInput.toOpenArray(offset, offset + 31).rawCopy(0, order, 0, 32)
-    doAssert eth_zkvm_secp256k1_verify(verified, invalidVerifyInput) == cttEVM_MalformedSignature
-
-  var offCurveVerifyInput = verifyInput
-  offCurveVerifyInput.toOpenArray(32, 95).setZero()
-  offCurveVerifyInput[95] = 1
-  doAssert eth_zkvm_secp256k1_verify(verified, offCurveVerifyInput) == cttEVM_PointNotOnCurve
-
-  var noPointRecoveryInput: array[97, byte]
-  noPointRecoveryInput[64] = 5
-  noPointRecoveryInput[96] = 1
-  doAssert eth_zkvm_secp256k1_ecrecover(recovered, noPointRecoveryInput) == cttEVM_MalformedSignature
-
-  stdout.write "zkVM secp256k1 ABI tests: Success\n"
-
-
 # ----------------------------------------------------------------------
 
 testSha256()
 testRipemd160()
-testZkvmSecp256k1()
 
 runPrecompileTests("modexp.json", eth_evm_modexp, 0)
 runPrecompileTests("modexp_eip2565.json", eth_evm_modexp, 0)

@@ -694,6 +694,7 @@ const testDesc: seq[tuple[path: string, useGMP: bool]] = @[
   ("tests/t_ethereum_evm_modexp.nim", false),
   ("tests/t_ethereum_evm_bn254_pairing.nim", false),
   ("tests/t_ethereum_evm_precompiles.nim", false),
+  ("tests/t_ethereum_zkvm_secp256k1.nim", false),
   ("tests/t_ethereum_bls_signatures.nim", false),
   ("tests/t_ethereum_eip2333_bls12381_key_derivation.nim", false),
   ("tests/t_ethereum_eip4844_deneb_kzg.nim", false),
