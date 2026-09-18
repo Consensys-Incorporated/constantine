@@ -7,7 +7,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 import
-  std/[importutils, unittest],
+  std/[importutils, strutils, unittest],
   constantine/ethereum_evm_precompiles,
   constantine/ethereum_ecdsa_signatures,
   constantine/hashes,
@@ -105,6 +105,16 @@ suite "zkVM secp256k1 ABI":
   test "ecrecover rejects a canonical x without a curve point":
     var input: array[97, byte]
     input[64] = 5
+    input[96] = 1
+    var recovered: array[64, byte]
+    check eth_zkvm_secp256k1_ecrecover(recovered, input) == cttEVM_MalformedSignature
+
+  test "ecrecover rejects a non-point x that cannot wrap into another candidate":
+    var input: array[97, byte]
+    input[32] = 27
+    let invalidR = "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140".parseHexStr()
+    for i, b in invalidR:
+      input[33 + i] = byte(ord(b))
     input[96] = 1
     var recovered: array[64, byte]
     check eth_zkvm_secp256k1_ecrecover(recovered, input) == cttEVM_MalformedSignature
