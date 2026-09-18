@@ -111,7 +111,7 @@ suite "zkVM secp256k1 ABI":
 
   test "ecrecover rejects a non-point x that cannot wrap into another candidate":
     var input: array[97, byte]
-    input[32] = 27
+    input[32] = 0
     let invalidR = "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140".parseHexStr()
     for i, b in invalidR:
       input[33 + i] = byte(ord(b))
