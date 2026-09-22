@@ -10,6 +10,7 @@ import
   std/[importutils, unittest],
   constantine/ethereum_ecdsa_signatures,
   constantine/math/arithmetic/finite_fields,
+  constantine/math/ec_shortweierstrass,
   constantine/math/io/io_fields,
   constantine/named/algebras
 
@@ -21,6 +22,9 @@ suite "ECDSA public key recovery":
         "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140"),
       s: Fr[Secp256k1].fromHex("01"))
     const message = "Constantine"
+
+    var R {.noinit.}: EC_ShortW_Aff[Fp[Secp256k1], G1]
+    check not bool(R.trySetFromCoordX(Fp[Secp256k1].fromBig(signature.r.toBig())))
 
     for evenY in [true, false]:
       var recovered {.noinit.}: PublicKey
