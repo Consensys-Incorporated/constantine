@@ -337,50 +337,36 @@ proc recoverPubkeyImpl_vartime*[Name: static Algebra; Sig](
   recovered.setNeutral()
   const G = Name.getGenerator($G1)
 
-  # Due to the conversion of the `x` coordinate in `Fp` of the point `R` in the signing process
-  # to a scalar in `Fr`, we potentially reduce it modulo the curve order (if `x >= r` with
-  # `r` the curve order).
-  # Candidate coordinates are r + i*n while they remain in the base field.
-  var x = signature.r.toBig()
-  let n = Fr[Name].getModulus()
-  let p = Fp[Name].getModulus()
-  var lastCandidate = p
-  lastCandidate -= n
-  while true:
-    # 1. Get base `R` point
-    var R {.noinit.}: ECAff
-    let valid = R.trySetFromCoordX(Fp[Name].fromBig(x))
-    if bool(valid):
-      let isEven = R.y.toBig().isEven()
-      # 2. only negate `y ↦ -y` if current and target even-ness disagree
-      R.y.cneg(isEven xor SecretBool evenY)
+  # 1. Get base `R` point
+  var R {.noinit.}: ECAff
+  let valid = R.trySetFromCoordX(Fp[Name].fromBig(signature.r.toBig()))
+  if not bool(valid):
+    return
+  let isEven = R.y.toBig().isEven()
+  # 2. only negate `y ↦ -y` if current and target even-ness disagree
+  R.y.cneg(isEven xor SecretBool evenY)
 
-      # 3. perform recovery calculation, `Q = -m·r⁻¹ * G + s·r⁻¹ * R`
-      # Note: Calculate with `r⁻¹` included in each coefficient to avoid 3rd `scalarMul`.
-      var rInv = signature.r
-      rInv.inv() # `r⁻¹`
+  # 3. perform recovery calculation, `Q = -m·r⁻¹ * G + s·r⁻¹ * R`
+  # Note: Calculate with `r⁻¹` included in each coefficient to avoid 3rd `scalarMul`.
+  var rInv = signature.r
+  rInv.inv() # `r⁻¹`
 
-      var u1 {.noinit.}, u2 {.noinit.}: Fr[Name]
-      u1.prod(msgHash, rInv)     # `u₁ = m·r⁻¹`
-      u1.neg()                   # `u₁ = -m·r⁻¹`
-      u2.prod(signature.s, rInv) # `u₂ = s·r⁻¹`
+  var u1 {.noinit.}, u2 {.noinit.}: Fr[Name]
+  u1.prod(msgHash, rInv)     # `u₁ = m·r⁻¹`
+  u1.neg()                   # `u₁ = -m·r⁻¹`
+  u2.prod(signature.s, rInv) # `u₂ = s·r⁻¹`
 
-      var Q {.noinit.}: ECJac # the potential public key
-      var point1 {.noinit.}, point2 {.noinit.}: ECJac
-      point1.scalarMul(u1, G)    # `p₁ = u₁ * G`
-      point2.scalarMul(u2, R)    # `p₂ = u₂ * R`
-      Q.sum(point1, point2)      # `Q = p₁ + p₂`
+  var Q {.noinit.}: ECJac # the potential public key
+  var point1 {.noinit.}, point2 {.noinit.}: ECJac
+  point1.scalarMul(u1, G)    # `p₁ = u₁ * G`
+  point2.scalarMul(u2, R)    # `p₂ = u₂ * R`
+  Q.sum(point1, point2)      # `Q = p₁ + p₂`
 
-      # 4. Verify signature with this point
-      let validSig = Q.getAffine().verifyImpl(signature, msgHash)
+  # 4. Verify signature with this point
+  let validSig = Q.getAffine().verifyImpl(signature, msgHash)
 
-      # 5. If valid copy to `recovered`, else keep neutral point
-      recovered.ccopy(Q.getAffine(), SecretBool validSig)
-      if validSig:
-        break
-    if bool(x >= lastCandidate):
-      break
-    x += n
+  # 5. If valid copy to `recovered`, else keep neutral point
+  recovered.ccopy(Q.getAffine(), SecretBool validSig)
 
 proc recoverPubkey*[Pubkey; Sig](
     recovered: var Pubkey,

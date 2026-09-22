@@ -109,6 +109,15 @@ suite "zkVM secp256k1 ABI":
     var recovered: array[64, byte]
     check eth_zkvm_secp256k1_ecrecover(recovered, input) == cttEVM_MalformedSignature
 
+  test "ecrecover rejects r=7 for parity-only recovery IDs":
+    var input: array[97, byte]
+    input[64] = 7
+    input[96] = 1
+    var recovered: array[64, byte]
+    for recid in 0'u8 .. 1'u8:
+      input[32] = recid
+      check eth_zkvm_secp256k1_ecrecover(recovered, input) == cttEVM_MalformedSignature
+
   test "ecrecover rejects a non-point x that cannot wrap into another candidate":
     var input: array[97, byte]
     input[32] = 0
