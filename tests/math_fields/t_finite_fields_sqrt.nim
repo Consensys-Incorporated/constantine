@@ -160,6 +160,7 @@ proc main() =
     randomSqrtCheck Bandersnatch
     randomSqrtCheck Pallas
     randomSqrtCheck Vesta
+    randomSqrtCheck Secp256k1
 
   suite "Modular sqrt(u/v)" & " [" & $WordBitWidth & "-bit words]":
     randomSqrtRatioCheck Edwards25519
