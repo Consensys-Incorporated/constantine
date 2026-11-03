@@ -8,4 +8,14 @@
 
 include ./panicoverride
 
-import constantine/ethereum_evm_precompiles
+import
+  constantine/ethereum_evm_precompiles,
+  ./c_curve_decls
+
+# The BLS12-381 scalar field, the field of EIP-4844 blob elements, with the same C API as the
+# full library's `bls12_381_fr`.
+type
+  big255 = BigInt[255]
+  bls12_381_fr = Fr[BLS12_381]
+
+genBindingsField(big255, bls12_381_fr)
