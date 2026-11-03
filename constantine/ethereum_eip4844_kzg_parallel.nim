@@ -13,7 +13,6 @@ import
   constantine/named/algebras,
   ./math/[ec_shortweierstrass, arithmetic, extension_fields],
   ./math/polynomials/polynomials_parallel,
-  ./hashes,
   ./commitments/kzg_parallel,
   ./serialization/[codecs_status_codes, codecs_bls12_381],
   ./math/io/io_fields,
@@ -316,6 +315,10 @@ proc verify_blob_kzg_proof_batch_parallel*(
   ## that is not in the control of a potential attacker to prevent potential
   ## rogue commitments attacks due to homomorphic properties of pairings,
   ## i.e. commitments that are linear combination of others and sum would be zero.
+  ##
+  ## If `secureRandomBytes` is all zeros, the random number is derived
+  ## through the Fiat-Shamir heuristic from all the (blob, commitment, proof) sets
+  ## as in the consensus specs' `verify_blob_kzg_proof_batch`, and the result is deterministic.
 
   mixin globalStatus
 
@@ -377,25 +380,15 @@ proc verify_blob_kzg_proof_batch_parallel*(
       break HappyPath
 
     var randomBlindingFr {.noInit.}: Fr[BLS12_381]
-    block blinding: # Ensure we don't multiply by 0 for blinding
-      # 1. Try with the random number supplied
-      for i in 0 ..< secureRandomBytes.len:
-        if secureRandomBytes[i] != byte 0:
-          randomBlindingFr.fromDigest(secureRandomBytes)
-          break blinding
-      # 2. If it's 0 (how?!), we just hash all the Fiat-Shamir opening_challenges
-      var transcript: sha256
-      transcript.init()
-      transcript.update(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN)
-      transcript.update(cast[ptr UncheckedArray[byte]](opening_challenges).toOpenArray(0, n*sizeof(Fr[BLS12_381])-1))
-
-      var blindingBytes {.noInit.}: array[32, byte]
-      transcript.finish(blindingBytes)
-      randomBlindingFr.fromDigest(blindingBytes)
-
     # TODO: use parallel prefix product for parallel powers compute
     let linearIndepRandNumbers = allocHeapArrayAligned(Fr[BLS12_381], n, alignment = 64)
-    linearIndepRandNumbers.computePowers(randomBlindingFr, n, skipOne = true)
+    if randomBlindingFr.getBatchBlindingFactor(secureRandomBytes):
+      linearIndepRandNumbers.computePowers(randomBlindingFr, n, skipOne = true)
+    else:
+      # Fall back to the consensus specs' derivation: r from all the verification sets, coefficients r⁰ .. rⁿ⁻¹
+      randomBlindingFr.fiatShamirBatchBlindingFactor(
+        commitments_bytes, opening_challenges, evals_at_challenges, proof_bytes, n)
+      linearIndepRandNumbers.computePowers(randomBlindingFr, n)
 
     type EcAffArray = ptr UncheckedArray[EC_ShortW_Aff[Fp[BLS12_381], G1]]
     let verif = tp.kzg_verify_batch_parallel(
