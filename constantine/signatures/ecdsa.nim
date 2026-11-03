@@ -267,6 +267,10 @@ proc verifyImpl*[Name: static Algebra; Sig](
   ## input needs those checks before the scalars reach this procedure.
   ##
   ## All inputs of a verification are public, this is variable-time.
+  static:
+    # Step 4 tests x ≡ r (mod n) by enumerating x = r and x = r + n.
+    # That is complete iff 2n > p, which equal bit-widths guarantee (n ≥ 2^(k-1) > p/2).
+    doAssert Fp[Name].bits == Fr[Name].bits
   # 1. Compute w = s⁻¹
   var w {.noinit.}: Fr[Name]
   w.inv_vartime(signature.s)
