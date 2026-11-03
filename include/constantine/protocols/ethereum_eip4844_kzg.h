@@ -187,6 +187,10 @@ ctt_eth_kzg_status ctt_eth_kzg_verify_blob_kzg_proof(
  *  that is not in the control of a potential attacker to prevent potential
  *  rogue commitments attacks due to homomorphic properties of pairings,
  *  i.e. commitments that are linear combination of others and sum would be zero.
+ *
+ *  If `secure_random_bytes` is all zeros, the random number is derived through
+ *  the Fiat-Shamir heuristic from all the (blob, commitment, proof) sets as in
+ *  the consensus specs' `verify_blob_kzg_proof_batch`, and the result is deterministic.
  */
 ctt_eth_kzg_status ctt_eth_kzg_verify_blob_kzg_proof_batch(
         const ctt_eth_kzg_context* ctx,
