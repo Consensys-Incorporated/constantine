@@ -11,9 +11,10 @@ import
   constantine/ethereum_evm_precompiles,
   constantine/ethereum_ecdsa_signatures,
   constantine/hashes,
-  constantine/math/arithmetic/finite_fields,
+  constantine/math/arithmetic,
+  constantine/math/ec_shortweierstrass,
   constantine/math/io/[io_bigints, io_fields],
-  constantine/named/algebras,
+  constantine/named/[algebras, zoo_generators],
   constantine/platforms/abstractions
 
 type ZkvmSecp256k1Fixture = object
@@ -158,3 +159,55 @@ suite "zkVM secp256k1 ABI":
     input[95] = 1
     var verified: array[1, byte]
     check eth_zkvm_secp256k1_verify(verified, input) == cttEVM_PointNotOnCurve
+
+  test "ecrecover rejects a recovered point at infinity":
+    # r = x(G), even y(G) and msg = s: Q = r⁻¹(s·G - msg·G) = O
+    var input: array[97, byte]
+    input.toOpenArray(33, 64).marshal(Secp256k1.getGenerator("G1").x.toBig(), bigEndian)
+    input[31] = 1 # msg = 1
+    input[96] = 1 # s = 1
+    input[32] = 0 # y(G) is even
+    var recovered: array[64, byte]
+    check eth_zkvm_secp256k1_ecrecover(recovered, input) == cttEVM_MalformedSignature
+
+  test "verify accepts a signature whose R has x in [n, p)":
+    # x(R) = r + n, which only the `x(R) mod n = r` reduction accepts.
+    # Q = r⁻¹(s·R - e·G) is the public key for which (r, s) signs e.
+    var R: EC_ShortW_Aff[Fp[Secp256k1], G1]
+    var k = 0'u64
+    while true:
+      inc k
+      var x = Fr[Secp256k1].getModulus()
+      x += SecretWord(k)
+      if bool(R.trySetFromCoordX(Fp[Secp256k1].fromBig(x))):
+        break
+
+    let r = Fr[Secp256k1].fromUint(k)
+    let s = Fr[Secp256k1].fromUint(2'u64)
+    let e = Fr[Secp256k1].fromUint(3'u64)
+    var rInv, u1, u2: Fr[Secp256k1]
+    rInv.inv(r)
+    u1.prod(e, rInv)
+    u1.neg()
+    u2.prod(s, rInv)
+    var gen, rJac, Q: EC_ShortW_Jac[Fp[Secp256k1], G1]
+    gen.fromAffine(Secp256k1.getGenerator("G1"))
+    rJac.fromAffine(R)
+    gen.scalarMul_vartime(u1.toBig())
+    rJac.scalarMul_vartime(u2.toBig())
+    Q.sum(gen, rJac)
+    let pubkey = Q.getAffine()
+
+    var input: array[160, byte]
+    input.toOpenArray(0, 31).marshal(e.toBig(), bigEndian)
+    input.toOpenArray(32, 63).marshal(pubkey.x.toBig(), bigEndian)
+    input.toOpenArray(64, 95).marshal(pubkey.y.toBig(), bigEndian)
+    input.toOpenArray(96, 127).marshal(r.toBig(), bigEndian)
+    input.toOpenArray(128, 159).marshal(s.toBig(), bigEndian)
+    var verified: array[1, byte]
+    check eth_zkvm_secp256k1_verify(verified, input) == cttEVM_Success
+    check verified[0] == 1
+
+    input[31] = 4 # e = 4
+    check eth_zkvm_secp256k1_verify(verified, input) == cttEVM_Success
+    check verified[0] == 0

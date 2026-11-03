@@ -553,6 +553,7 @@ const testDesc: seq[tuple[path: string, useGMP: bool]] = @[
   ("tests/math_elliptic_curves/t_ec_twedwards_mul_endomorphism_bandersnatch.nim", false),
 
   ("tests/math_elliptic_curves/t_ec_scalar_mul_vartime_exhaustive.nim", false),
+  ("tests/math_elliptic_curves/t_ec_scalar_mul_double_base_vartime.nim", false),
 
   # Elliptic curve arithmetic 𝔾₂
   # ----------------------------------------------------------

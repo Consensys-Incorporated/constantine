@@ -22,6 +22,8 @@ import
   constantine/platforms/abstractions,
   constantine/math_arbitrary_precision/arithmetic/limbs_views,
   constantine/named/zoo_endomorphisms,
+  constantine/named/zoo_generators,
+  constantine/named/constants/secp256k1_generator_wnaf_tables,
   constantine/named/algebras
 
 {.push raises: [].} # No exceptions allowed in core cryptographic operations
@@ -466,6 +468,89 @@ func scalarMulEndo_wNAF_vartime*[scalBits: static int; EC](
       else:
         isInit = P.initNAF(tab[m], tabNaf[m], NafLen, i)
 
+# Double-base scalar multiplication [u₁]G + [u₂]Q
+# ------------------------------------------------------------
+
+func accumWnafDigit[EC, ECaff](
+       P: var EC,
+       tab: openArray[ECaff],
+       digit: int8, negate: bool) {.inline.} =
+  ## P <- P ± [|digit|]B with tab[i] = [2i+1]B,
+  ## the sign being the sign of digit, flipped if `negate`
+  if digit > 0:
+    if negate: P ~-= tab[digit shr 1]
+    else:      P ~+= tab[digit shr 1]
+  elif digit < 0:
+    if negate: P ~+= tab[(-digit) shr 1]
+    else:      P ~-= tab[(-digit) shr 1]
+
+func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
+       r: var EC,
+       u1: BigInt[scalBits],
+       u2: BigInt[scalBits], Q: ECaff,
+       tabG, tabEndoG: openArray[ECaff], windowG: static int,
+       windowQ: static int) {.tags:[VarTime], meter.} =
+  ## **Variable-time** double-base scalar multiplication
+  ##
+  ##   r <- [u₁]G + [u₂]Q
+  ##
+  ## with G a fixed base given as wNAF tables of odd multiples
+  ## tabG = [1]G, [3]G, ... and tabEndoG = φ([1]G), φ([3]G), ...
+  ##
+  ## Both scalars are split with the GLV endomorphism
+  ## and the 4 resulting mini-scalars share a single chain of doublings (Straus/Shamir trick).
+  ##
+  ## This MUST NOT be used with secret data.
+  static:
+    doAssert ECaff.F is Fp, "Only 2-way GLV decompositions are supported"
+    # wNAF digits are odd and below 2^(window-1) in absolute value, stored as int8
+    doAssert windowG in 2..8 and windowQ in 2..8, "wNAF windows above 8 overflow int8 digits"
+  const M = 2
+  const frBits = EC.getScalarField().bits()
+  const L = frBits.computeEndoRecodedLength(M)
+  const tabQLen = 1 shl (windowQ - 2)
+  debug:
+    doAssert tabG.len == 1 shl (windowG - 2)
+    doAssert tabEndoG.len == 1 shl (windowG - 2)
+
+  # 1. Decompose scalars into mini-scalars, the signs are applied to the wNAF digits
+  var k1 {.noInit.}, k2 {.noInit.}: array[M, BigInt[L]]
+  var neg1 {.noInit.}, neg2 {.noInit.}: array[M, SecretBool]
+  k1.decomposeEndo(neg1, u1, frBits, EC.getName(), G1)
+  k2.decomposeEndo(neg2, u2, frBits, EC.getName(), G1)
+
+  # 2. Odd multiples of Q and of φ(Q), φ(x, y) = (βx, y) preserves the multiples
+  var tabQ {.noInit.}, tabEndoQ {.noInit.}: array[tabQLen, ECaff]
+  block:
+    var tabJac {.noInit.}: array[tabQLen, EC]
+    var Q2 {.noInit.}: EC
+    tabJac[0].fromAffine(Q)
+    Q2.double(tabJac[0])
+    for i in 1 ..< tabQLen:
+      tabJac[i].sum_vartime(tabJac[i-1], Q2)
+    tabQ.batchAffine_vartime(tabJac)
+    for i in 0 ..< tabQLen:
+      tabEndoQ[i].computeEndomorphism(tabQ[i])
+
+  # 3. wNAF recoding, least significant digit first
+  const NafLen = L+1
+  var nafs: array[2*M, array[NafLen, int8]] # zero-init: digits above each recoded length are 0
+  var nafLen = 0
+  nafLen = max(nafLen, nafs[0].recode_r2l_signed_window_vartime(k1[0], windowG))
+  nafLen = max(nafLen, nafs[1].recode_r2l_signed_window_vartime(k1[1], windowG))
+  nafLen = max(nafLen, nafs[2].recode_r2l_signed_window_vartime(k2[0], windowQ))
+  nafLen = max(nafLen, nafs[3].recode_r2l_signed_window_vartime(k2[1], windowQ))
+
+  # 4. Interleaved double-and-add from the most significant digit
+  r.setNeutral()
+  for i in countdown(nafLen-1, 0):
+    if not r.isNeutral().bool:
+      r.double()
+    r.accumWnafDigit(tabG,     nafs[0][i], neg1[0].bool)
+    r.accumWnafDigit(tabEndoG, nafs[1][i], neg1[1].bool)
+    r.accumWnafDigit(tabQ,     nafs[2][i], neg2[0].bool)
+    r.accumWnafDigit(tabEndoQ, nafs[3][i], neg2[1].bool)
+
 # ############################################################
 #
 #                 Public API
@@ -560,6 +645,50 @@ func scalarMul_vartime*[EC; Ecaff: not EC](R: var EC, scalar: Fr or BigInt, P: E
   ## Those conditions will be assumed.
   R.fromAffine(P)
   R.scalarMul_vartime(scalar)
+
+func scalarMulDoubleBase_vartime*[scalBits: static int; F, G](
+       r: var EC_ShortW_Jac[F, G],
+       u1: BigInt[scalBits],
+       u2: BigInt[scalBits], Q: EC_ShortW_Aff[F, G]) {.tags:[VarTime], meter.} =
+  ## **Variable-time** double-base scalar multiplication
+  ##
+  ##   r <- [u₁]G + [u₂]Q
+  ##
+  ## with G the generator of the curve subgroup G.
+  ## This is the core of ECDSA verification and public key recovery.
+  ##
+  ## Endomorphism acceleration, when used, requires:
+  ## - Cofactor to be cleared
+  ## - 0 <= scalar < curve order
+  ## Those conditions will be assumed.
+  ##
+  ## This MUST NOT be used with secret data.
+  const Name = F.Name
+  when Name == Secp256k1 and G == G1:
+    r.scalarMulDoubleBaseEndo_wNAF_vartime(
+      u1, u2, Q,
+      Secp256k1_generator_G1_wnafTable, Secp256k1_generator_G1_endo_wnafTable,
+      windowG = Secp256k1_generator_G1_wnafWindow,
+      windowQ = 5)
+  else:
+    const Gen = Name.getGenerator($G)
+    var t {.noInit.}: EC_ShortW_Jac[F, G]
+    r.scalarMul_vartime(u1, Gen)
+    t.scalarMul_vartime(u2, Q)
+    r ~+= t
+
+func scalarMulDoubleBase_vartime*[F, G](
+       r: var EC_ShortW_Jac[F, G],
+       u1: Fr,
+       u2: Fr, Q: EC_ShortW_Aff[F, G]) {.inline.} =
+  ## **Variable-time** double-base scalar multiplication
+  ##
+  ##   r <- [u₁]G + [u₂]Q
+  ##
+  ## with G the generator of the curve subgroup G.
+  ##
+  ## This MUST NOT be used with secret data.
+  r.scalarMulDoubleBase_vartime(u1.toBig(), u2.toBig(), Q)
 
 # ############################################################
 #
