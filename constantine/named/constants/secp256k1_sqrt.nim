@@ -21,7 +21,8 @@ func invsqrt_addchain*(r: var Fp[Secp256k1], a: Fp[Secp256k1]) {.addchain.} =
   ##
   ## (p-3)/4 = 2²⁵⁴ - 2³⁰ - 245, in binary from the most significant bit:
   ##   223 ones, 0, 22 ones, 0000, 1, 0, 11
-  ## 253 squarings and 13 multiplications, the chain of libsecp256k1's field square root.
+  ## 253 squarings and 14 multiplications.
+  ## Adapted from libsecp256k1's square root chain, which computes (p+1)/4 in 13 multiplications.
   var
     x2   {.noInit.}: Fp[Secp256k1]
     x3   {.noInit.}: Fp[Secp256k1]
