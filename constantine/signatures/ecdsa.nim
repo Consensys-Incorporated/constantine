@@ -266,6 +266,8 @@ proc verifyImpl*[Name: static Algebra; Sig](
   ## signature scalars are canonical (nonzero, below the curve order); raw byte
   ## input needs those checks before the scalars reach this procedure.
   ##
+  ## The curve must have cofactor 1.
+  ##
   ## All inputs of a verification are public, this is variable-time.
   static:
     # Step 4 tests x ≡ r (mod n) by enumerating x = r and x = r + n.
@@ -338,6 +340,9 @@ proc recoverPubkeyImpl_vartime*[Name: static Algebra; Sig](
   ## pair.
   ##
   ## If the signature is invalid, `recovered` will be set to the neutral element.
+  ##
+  ## The curve must have cofactor 1: `R` is not subgroup-checked, and dropping the
+  ## re-verification of the recovered key relies on `R` having order dividing `n`.
   type
     ECAff = EC_ShortW_Aff[Fp[Name], G1]
     ECJac = EC_ShortW_Jac[Fp[Name], G1]
