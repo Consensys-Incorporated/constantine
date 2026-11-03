@@ -22,13 +22,22 @@ const TrustedSetupMainnet* =
     "commitments_setups" /
     "trusted_setup_ethereum_kzg4844_reference.dat"
 
-proc getTrustedSetup*(): ptr EthereumKZGContext =
-  ## This is a convenience function for the Ethereum mainnet testing trusted setups.
-  var ctx: ptr EthereumKZGContext
-  let tsStatus = ctx.new(TrustedSetupMainnet, kReferenceCKzg4844)
-  doAssert tsStatus == tsSuccess, "\n[Trusted Setup Error] " & $tsStatus
-  echo "Trusted Setup loaded successfully"
-  return ctx
+when defined(CTT_KZG_VERIFICATION_ONLY):
+  proc getTrustedSetup*(): ptr EthereumKZGContext =
+    ## The verification-only profile only has a context built from the embedded trusted setup.
+    var ctx: ptr EthereumKZGContext
+    let tsStatus = ctx.newEmbedded()
+    doAssert tsStatus == tsSuccess, "\n[Trusted Setup Error] " & $tsStatus
+    echo "Embedded verification-only trusted setup loaded successfully"
+    return ctx
+else:
+  proc getTrustedSetup*(): ptr EthereumKZGContext =
+    ## This is a convenience function for the Ethereum mainnet testing trusted setups.
+    var ctx: ptr EthereumKZGContext
+    let tsStatus = ctx.new(TrustedSetupMainnet, kReferenceCKzg4844)
+    doAssert tsStatus == tsSuccess, "\n[Trusted Setup Error] " & $tsStatus
+    echo "Trusted Setup loaded successfully"
+    return ctx
 
 const SkippedTests = [
   ""

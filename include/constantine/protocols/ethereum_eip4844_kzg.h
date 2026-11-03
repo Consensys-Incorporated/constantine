@@ -87,8 +87,9 @@ typedef enum __attribute__((__packed__)) {
 // ------------------------------------------------------------------------------------------------
 // Libraries built with CTT_EMBEDDED_KZG expose the full API using an embedded
 // trusted setup. Adding CTT_KZG_VERIFICATION_ONLY restricts availability to
-// ctt_eth_kzg_verify_kzg_proof, ctt_eth_evm_kzg_point_evaluation, and context
-// construction/destruction; other declarations below are not present in that library.
+// ctt_eth_kzg_verify_kzg_proof, ctt_eth_kzg_verify_blob_kzg_proof,
+// ctt_eth_kzg_verify_blob_kzg_proof_batch, ctt_eth_evm_kzg_point_evaluation,
+// and context construction/destruction; other declarations below are not present in that library.
 
 #ifndef CTT_KZG_VERIFICATION_ONLY
 /** Compute a commitment to the `blob`.
@@ -163,6 +164,7 @@ ctt_eth_kzg_status ctt_eth_kzg_compute_blob_kzg_proof(
         const ctt_eth_kzg_blob* blob,
         const ctt_eth_kzg_commitment* commitment
 ) __attribute__((__warn_unused_result__));
+#endif
 
 /** Given a blob and a KZG proof, verify that the blob data corresponds to the provided commitment.
  */
@@ -194,7 +196,6 @@ ctt_eth_kzg_status ctt_eth_kzg_verify_blob_kzg_proof_batch(
         size_t n,
         const byte secure_random_bytes[32]
 ) __attribute__((__warn_unused_result__));
-#endif
 
 
 // Ethereum EIP-4844 KZG context management
@@ -251,9 +252,10 @@ ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_with_precompute(
  *
  *  With CTT_EMBEDDED_KZG alone, the full setup and all KZG/PeerDAS APIs are
  *  available. With CTT_KZG_VERIFICATION_ONLY, only the canonical [tau]G2 point
- *  is embedded and this context supports ctt_eth_kzg_verify_kzg_proof and
- *  ctt_eth_evm_kzg_point_evaluation. The symbol is present only in libraries
- *  built with CTT_EMBEDDED_KZG.
+ *  and the bit-reversed roots of unity are initialized and this context supports
+ *  ctt_eth_kzg_verify_kzg_proof, ctt_eth_kzg_verify_blob_kzg_proof,
+ *  ctt_eth_kzg_verify_blob_kzg_proof_batch and ctt_eth_evm_kzg_point_evaluation.
+ *  The symbol is present only in libraries built with CTT_EMBEDDED_KZG.
  */
 ctt_eth_trusted_setup_status ctt_eth_kzg_context_new_embedded(
     ctt_eth_kzg_context** ctx
