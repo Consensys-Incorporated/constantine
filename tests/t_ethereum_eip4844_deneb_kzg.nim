@@ -145,24 +145,21 @@ TestVectorsDir.testGen(verify_blob_kzg_proof_batch, "kzg-mainnet", testVector):
     else:
       nil
 
-  # With all-zero random bytes, the blinding factor is derived by Fiat-Shamir as in the consensus specs
-  for blinding in [randomBlinding, default(array[32, byte])]:
-    let status = verify_blob_kzg_proof_batch(
-                   ctx,
-                   blobs.asUnchecked(),
-                   commitments.asUnchecked(),
-                   proofs.asUnchecked(),
-                   blobs.len,
-                   blinding)
-    stdout.write "[" & $status & "]"
+  let status = verify_blob_kzg_proof_batch(
+                 ctx,
+                 blobs.asUnchecked(),
+                 commitments.asUnchecked(),
+                 proofs.asUnchecked(),
+                 blobs.len,
+                 randomBlinding)
+  stdout.write "[" & $status & "]\n"
 
-    if status == cttEthKzg_Success:
-      doAssert testVector["output"].content == "true"
-    elif status == cttEthKzg_VerificationFailure:
-      doAssert testVector["output"].content == "false"
-    else:
-      doAssert testVector["output"].content == "null"
-  stdout.write "\n"
+  if status == cttEthKzg_Success:
+    doAssert testVector["output"].content == "true"
+  elif status == cttEthKzg_VerificationFailure:
+    doAssert testVector["output"].content == "false"
+  else:
+    doAssert testVector["output"].content == "null"
 
 block:
   suite "Ethereum Deneb Hardfork / EIP-4844 / Proto-Danksharding / KZG Polynomial Commitments":

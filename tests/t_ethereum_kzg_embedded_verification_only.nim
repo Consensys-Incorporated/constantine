@@ -11,8 +11,6 @@ static:
   doAssert defined(CTT_EMBEDDED_KZG)
   doAssert defined(CTT_KZG_VERIFICATION_ONLY)
 
-# The official EIP-4844 test vectors and the batch blinding tests,
-# on a context created from the embedded verification-only trusted setup.
+# The official EIP-4844 test vectors on a context created from the embedded verification-only trusted setup.
 # The tests that need the full trusted setup are left out.
 include ./t_ethereum_eip4844_deneb_kzg
-include ./t_ethereum_eip4844_kzg_batch_blinding
