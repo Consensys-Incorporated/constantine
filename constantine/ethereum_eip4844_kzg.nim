@@ -460,7 +460,7 @@ func verify_blob_kzg_proof*(
        ctx: ptr EthereumKZGContext,
        blob: Blob,
        commitment_bytes: array[48, byte],
-       proof_bytes: array[48, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
+       proof_bytes: array[48, byte]): cttEthKzgStatus {.fullKzgApi: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
   ## Given a blob and a KZG proof, verify that the blob data corresponds to the provided commitment.
 
   var commitment {.noInit.}: KZGCommitment
@@ -500,7 +500,7 @@ func verify_blob_kzg_proof_batch*(
        commitments_bytes: ptr UncheckedArray[array[48, byte]],
        proof_bytes: ptr UncheckedArray[array[48, byte]],
        n: int,
-       secureRandomBytes: array[32, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
+       secureRandomBytes: array[32, byte]): cttEthKzgStatus {.fullKzgApi: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
   ## Verify `n` (blob, commitment, proof) sets efficiently
   ##
   ## `n` is the number of verifications set

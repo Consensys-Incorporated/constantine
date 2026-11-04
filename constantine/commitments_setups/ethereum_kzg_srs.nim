@@ -219,12 +219,10 @@ type
     # For most schemes (Marlin, Plonk, Sonic, Ethereum's Deneb), only [τ]H is needed
     # but Ethereum's sharding will need 64 (65 with the generator H)
 
-    domain_brp*{.align: 64.}: PolyEvalRootsDomain[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381], kBitReversed]
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      domain_brp*{.align: 64.}: PolyEvalRootsDomain[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381], kBitReversed]
     # The domain field holds the roots of unity of the polynomial evaluation domain.
     # Important: for Ethereum, roots of unity are used in bit-reversed order
-    #
-    # Blob verification evaluates the blob polynomial at the opening challenge,
-    # so it is part of the verification-only context as well.
 
     when not defined(CTT_KZG_VERIFICATION_ONLY):
       ecfft_desc_ext*{.align: 64.}: ECFFT_Descriptor[EC_ShortW_Jac[Fp[BLS12_381], G1]]
@@ -412,16 +410,6 @@ proc setupPolyphaseSpectrumBank(ctx: ptr EthereumKZGContext, t: int = 0, b: int 
       for offset in 0 ..< FIELD_ELEMENTS_PER_CELL:
         ctx.polyphaseSpectrumBank.rawPoints[pos][offset] = tmp[offset][pos]
 
-proc setupKzg4844Domain(ctx: ptr EthereumKZGContext) =
-  ## Initialize the domain (bit-reversed roots of unity for polynomial evaluation)
-  ## Domain: FIELD_ELEMENTS_PER_BLOB (4096) roots of unity (bit-reversed)
-  ##
-  ## It is computed on the fly: 4095 multiplications, one bit-reversal permutation and one inversion.
-  ctx.domain_brp.rootsOfUnity.computeRootsOfUnity(generatorRootOfunity = getRootOfUnityForSize(FIELD_ELEMENTS_PER_BLOB))
-  ctx.domain_brp.rootsOfUnity.bit_reversal_permutation()
-  ctx.domain_brp.invMaxDegree.fromUint(ctx.domain_brp.rootsOfUnity.len.uint64)
-  ctx.domain_brp.invMaxDegree.inv_vartime()
-
 proc setupKzg4844ProtoDanksharding(ctx: ptr EthereumKZGContext) {.fullKzgContext.} =
   block:
     # Powers of tau: [G, [τ]G, [τ²]G, ... [τ⁴⁰⁹⁶]G]
@@ -431,7 +419,13 @@ proc setupKzg4844ProtoDanksharding(ctx: ptr EthereumKZGContext) {.fullKzgContext
 
     # G1 Monomial points are already loaded from the trusted setup file
 
-  ctx.setupKzg4844Domain()
+  block:
+    # Initialize domain (bit-reversed roots of unity for polynomial evaluation)
+    # Domain: FIELD_ELEMENTS_PER_BLOB (4096) roots of unity (bit-reversed)
+    ctx.domain_brp.rootsOfUnity.computeRootsOfUnity(generatorRootOfunity = getRootOfUnityForSize(FIELD_ELEMENTS_PER_BLOB))
+    ctx.domain_brp.rootsOfUnity.bit_reversal_permutation()
+    ctx.domain_brp.invMaxDegree.fromUint(ctx.domain_brp.rootsOfUnity.len.uint64)
+    ctx.domain_brp.invMaxDegree.inv_vartime()
 
 proc setupKzg7594PeerDAS(ctx: ptr EthereumKZGContext, t, b: int) {.fullKzgContext.} =
   # Initialize FFT descriptors
@@ -572,9 +566,7 @@ when defined(CTT_EMBEDDED_KZG):
       freeHeapAligned(ctx)
       ctx = nil
       return
-    when defined(CTT_KZG_VERIFICATION_ONLY):
-      ctx.setupKzg4844Domain()
-    else:
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
       ctx.setupKzg4844ProtoDanksharding()
       ctx.setupKzg7594PeerDAS(t=0, b=0)
 
