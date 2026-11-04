@@ -20,11 +20,6 @@ import
   # Test utilities
   ./testutils/eth_consensus_utils
 
-when not defined(CTT_KZG_VERIFICATION_ONLY):
-  import
-    constantine/ethereum_eip4844_kzg_parallel,
-    constantine/threadpool/threadpool
-
 # The blinding factor r of verify_blob_kzg_proof_batch and its powers cᵢ weigh the n verification sets in
 #   ∑ cᵢ.πᵢ.(τ - zᵢ) = ∑ cᵢ.(Pᵢ(τ) - yᵢ)
 # with πᵢ the proofs, zᵢ the opening challenges, Pᵢ the polynomials the commitments commit to
@@ -33,11 +28,6 @@ when not defined(CTT_KZG_VERIFICATION_ONLY):
 type
   Bytes48 = array[48, byte]
   Poly = PolynomialEval[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381], kBitReversed]
-
-  BatchVerifier = proc(
-    blobs: ptr UncheckedArray[Blob],
-    commitments, proofs: ptr UncheckedArray[Bytes48],
-    n: int, randomBytes: array[32, byte]): cttEthKzgStatus {.closure.}
 
 proc toBlob(poly: ref Poly): ref Blob =
   new result
@@ -55,7 +45,7 @@ proc pseudoRandomPoly(seed: uint64): ref Poly =
     x += Fr[BLS12_381].fromUint(uint64(i+1))
     result.evals[i] = x
 
-proc testBlindingMatchesSpecs(ctx: ptr EthereumKZGContext, verify: BatchVerifier) =
+proc testBlindingMatchesSpecs(ctx: ptr EthereumKZGContext) =
   ## With all-zero random bytes, verify_blob_kzg_proof_batch must weigh the sets by the powers [r⁰, ..., rⁿ⁻¹]
   ## of the blinding factor of the consensus specs' verify_kzg_proof_batch:
   ##   r = hash_to_bls_field(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN ‖ uint64_be(FIELD_ELEMENTS_PER_BLOB) ‖ uint64_be(n)
@@ -134,7 +124,7 @@ proc testBlindingMatchesSpecs(ctx: ptr EthereumKZGContext, verify: BatchVerifier
     ctx.srs_monomial_g2.coefs[1].affine(tauG2)
 
   proc verifyBatch(randomBytes: array[32, byte]): cttEthKzgStatus =
-    verify(
+    ctx.verify_blob_kzg_proof_batch(
       cast[ptr UncheckedArray[Blob]](blobs[][0].unsafeAddr),
       cast[ptr UncheckedArray[Bytes48]](commitments[0].addr),
       cast[ptr UncheckedArray[Bytes48]](proofs[0].addr),
@@ -169,7 +159,7 @@ when not defined(CTT_KZG_VERIFICATION_ONLY):
       transcript.update(cast[ptr UncheckedArray[byte]](challenges[0].unsafeAddr).toOpenArray(0, 2*sizeof(Fr[BLS12_381])-1))
     transcript.finish(result)
 
-  proc testForgedBatchIsRejected(ctx: ptr EthereumKZGContext, verify: BatchVerifier) =
+  proc testForgedBatchIsRejected(ctx: ptr EthereumKZGContext) =
     ## A batch of 2 sets (blob₁, commitment₁, proof₁), (blob₂, commitment₂, proof₂)
     ## where commitment₁ does not commit to blob₁, valid if the blinding factor r
     ## is known before proof₁ and proof₂ are chosen, as c₁ = r and c₂ = r².
@@ -238,7 +228,7 @@ when not defined(CTT_KZG_VERIFICATION_ONLY):
       doAssert ctx.blob_to_kzg_commitment(result[0], quotient.toBlob()[]) == cttEthKzg_Success
 
     proc verifyBatch(proofs: array[2, Bytes48], randomBytes: array[32, byte]): cttEthKzgStatus =
-      verify(
+      ctx.verify_blob_kzg_proof_batch(
         cast[ptr UncheckedArray[Blob]](blobs[][0].addr),
         cast[ptr UncheckedArray[Bytes48]](commitments[0].addr),
         cast[ptr UncheckedArray[Bytes48]](proofs[0].unsafeAddr),
@@ -262,30 +252,11 @@ when not defined(CTT_KZG_VERIFICATION_ONLY):
 suite "Ethereum Deneb Hardfork / EIP-4844 / KZG batch verification blinding factor":
   test "Fiat-Shamir blinding factor and weights are the consensus specs' ones":
     let ctx = getTrustedSetup()
-    testBlindingMatchesSpecs(ctx,
-      proc(blobs: ptr UncheckedArray[Blob], commitments, proofs: ptr UncheckedArray[Bytes48],
-           n: int, randomBytes: array[32, byte]): cttEthKzgStatus =
-        ctx.verify_blob_kzg_proof_batch(blobs, commitments, proofs, n, randomBytes))
-    when not defined(CTT_KZG_VERIFICATION_ONLY):
-      let tp = Threadpool.new()
-      testBlindingMatchesSpecs(ctx,
-        proc(blobs: ptr UncheckedArray[Blob], commitments, proofs: ptr UncheckedArray[Bytes48],
-             n: int, randomBytes: array[32, byte]): cttEthKzgStatus =
-          tp.verify_blob_kzg_proof_batch_parallel(ctx, blobs, commitments, proofs, n, randomBytes))
-      tp.shutdown()
+    testBlindingMatchesSpecs(ctx)
     ctx.delete()
 
   when not defined(CTT_KZG_VERIFICATION_ONLY):
     test "A batch with a commitment that is not the blob's and proofs chosen after the challenges is rejected":
       let ctx = getTrustedSetup()
-      testForgedBatchIsRejected(ctx,
-        proc(blobs: ptr UncheckedArray[Blob], commitments, proofs: ptr UncheckedArray[Bytes48],
-             n: int, randomBytes: array[32, byte]): cttEthKzgStatus =
-          ctx.verify_blob_kzg_proof_batch(blobs, commitments, proofs, n, randomBytes))
-      let tp = Threadpool.new()
-      testForgedBatchIsRejected(ctx,
-        proc(blobs: ptr UncheckedArray[Blob], commitments, proofs: ptr UncheckedArray[Bytes48],
-             n: int, randomBytes: array[32, byte]): cttEthKzgStatus =
-          tp.verify_blob_kzg_proof_batch_parallel(ctx, blobs, commitments, proofs, n, randomBytes))
-      tp.shutdown()
+      testForgedBatchIsRejected(ctx)
       ctx.delete()
