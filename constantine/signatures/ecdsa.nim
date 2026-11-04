@@ -10,7 +10,7 @@ import
   constantine/hashes,
   constantine/named/algebras,
   constantine/math/io/[io_bigints, io_fields],
-  constantine/math/elliptic/[ec_shortweierstrass_affine, ec_shortweierstrass_jacobian, ec_scalar_mul, ec_multi_scalar_mul],
+  constantine/math/elliptic/[ec_shortweierstrass_affine, ec_shortweierstrass_jacobian, ec_scalar_mul, ec_scalar_mul_vartime, ec_multi_scalar_mul],
   constantine/math/[arithmetic, ec_shortweierstrass],
   constantine/platforms/[abstractions, views],
   constantine/mac/mac_hmac, # for deterministic nonce generation via RFC 6979
@@ -265,9 +265,17 @@ proc verifyImpl*[Name: static Algebra; Sig](
   ## Caller contract: the public key is a validated on-curve point and the
   ## signature scalars are canonical (nonzero, below the curve order); raw byte
   ## input needs those checks before the scalars reach this procedure.
+  ##
+  ## The curve must have cofactor 1.
+  ##
+  ## All inputs of a verification are public, this is variable-time.
+  static:
+    # Step 4 tests x ≡ r (mod n) by enumerating x = r and x = r + n.
+    # That is complete iff 2n > p, which equal bit-widths guarantee (n ≥ 2^(k-1) > p/2).
+    doAssert Fp[Name].bits == Fr[Name].bits
   # 1. Compute w = s⁻¹
-  var w = signature.s
-  w.inv() # w = s⁻¹
+  var w {.noinit.}: Fr[Name]
+  w.inv_vartime(signature.s)
 
   # 2. Compute u₁ = ew and u₂ = rw
   var
@@ -276,23 +284,25 @@ proc verifyImpl*[Name: static Algebra; Sig](
   u1.prod(msgHash, w)
   u2.prod(signature.r, w)
 
-  # 3. Compute u₁G + u₂Q
-  var
-    point1 {.noinit.}: EC_ShortW_Jac[Fp[Name], G1]
-    point2 {.noinit.}: EC_ShortW_Jac[Fp[Name], G1]
-  # Generator of the curve
-  const G = publicKey.F.Name.getGenerator($publicKey.G)
-  point1.scalarMul(u1, G)
-  point2.scalarMul(u2, publicKey)
+  # 3. Compute R = u₁G + u₂Q
   var R {.noinit.}: EC_ShortW_Jac[Fp[Name], G1]
-  R.sum(point1, point2)
+  R.scalarMulDoubleBase_vartime(u1, u2, publicKey)
+  if R.isNeutral().bool:
+    return false
 
-  # 4. Get x coordinate (in `Fp`) and convert to `Fr` (like in signing)
-  let x = R.getAffine().x
-  let r_computed = Fr[Name].fromBig(x.toBig())
-
-  # 5. Verify r_computed equals provided r
-  result = bool(r_computed == signature.r)
+  # 4. Check x(R) ≡ r (mod n) without an inversion:
+  #    x(R) = X/Z², so test X = x·Z² for each x < p with x ≡ r (mod n), i.e. x = r and x = r + n
+  var z2 {.noinit.}, xz2 {.noinit.}: Fp[Name]
+  z2.square(R.z)
+  var x = signature.r.toBig()
+  xz2.prod(Fp[Name].fromBig(x), z2)
+  if bool(xz2 == R.x):
+    return true
+  let carry = x.add(Fr[Name].getModulus())
+  if carry.bool or not bool(x < Fp[Name].getModulus()):
+    return false
+  xz2.prod(Fp[Name].fromBig(x), z2)
+  return bool(xz2 == R.x)
 
 func coreVerify*[Pubkey, Sig](
     pubkey: Pubkey,
@@ -330,26 +340,27 @@ proc recoverPubkeyImpl_vartime*[Name: static Algebra; Sig](
   ## pair.
   ##
   ## If the signature is invalid, `recovered` will be set to the neutral element.
+  ##
+  ## The curve must have cofactor 1: `R` is not subgroup-checked, and dropping the
+  ## re-verification of the recovered key relies on `R` having order dividing `n`.
   type
     ECAff = EC_ShortW_Aff[Fp[Name], G1]
     ECJac = EC_ShortW_Jac[Fp[Name], G1]
   # 1. Set to neutral so if we don't find a valid signature, return neutral
   recovered.setNeutral()
-  const G = Name.getGenerator($G1)
 
-  # 1. Get base `R` point
+  # 2. Get the `R` point with x = r and the requested `y` parity.
+  #    `x = r + i·n` candidates are not considered: Ethereum recovery ids only encode the `y` parity.
   var R {.noinit.}: ECAff
   let valid = R.trySetFromCoordX(Fp[Name].fromBig(signature.r.toBig()))
   if not bool(valid):
     return
-  let isEven = R.y.toBig().isEven()
-  # 2. only negate `y ↦ -y` if current and target even-ness disagree
-  R.y.cneg(isEven xor SecretBool evenY)
+  if R.y.toBig().isOdd().bool == evenY:
+    R.y.neg()
 
-  # 3. perform recovery calculation, `Q = -m·r⁻¹ * G + s·r⁻¹ * R`
-  # Note: Calculate with `r⁻¹` included in each coefficient to avoid 3rd `scalarMul`.
-  var rInv = signature.r
-  rInv.inv() # `r⁻¹`
+  # 3. Recovery `Q = r⁻¹(s·R - m·G) = (-m·r⁻¹)·G + (s·r⁻¹)·R`
+  var rInv {.noinit.}: Fr[Name]
+  rInv.inv_vartime(signature.r) # `r⁻¹`
 
   var u1 {.noinit.}, u2 {.noinit.}: Fr[Name]
   u1.prod(msgHash, rInv)     # `u₁ = m·r⁻¹`
@@ -357,16 +368,14 @@ proc recoverPubkeyImpl_vartime*[Name: static Algebra; Sig](
   u2.prod(signature.s, rInv) # `u₂ = s·r⁻¹`
 
   var Q {.noinit.}: ECJac # the potential public key
-  var point1 {.noinit.}, point2 {.noinit.}: ECJac
-  point1.scalarMul(u1, G)    # `p₁ = u₁ * G`
-  point2.scalarMul(u2, R)    # `p₂ = u₂ * R`
-  Q.sum(point1, point2)      # `Q = p₁ + p₂`
+  Q.scalarMulDoubleBase_vartime(u1, u2, R)
 
-  # 4. Verify signature with this point
-  let validSig = Q.getAffine().verifyImpl(signature, msgHash)
-
-  # 5. If valid copy to `recovered`, else keep neutral point
-  recovered.ccopy(Q.getAffine(), SecretBool validSig)
+  # 4. `Q` verifies the signature by construction, as verification computes
+  #      (m/s)·G + (r/s)·Q = (m/s)·G + (r/s)·r⁻¹(s·R - m·G) = R, whose x coordinate is r,
+  #    except when `Q` is the point at infinity, which is not a valid public key.
+  if Q.isNeutral().bool:
+    return
+  recovered.affine_vartime(Q)
 
 proc recoverPubkey*[Pubkey; Sig](
     recovered: var Pubkey,

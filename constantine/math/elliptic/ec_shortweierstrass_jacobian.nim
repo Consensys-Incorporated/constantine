@@ -663,6 +663,20 @@ func affine*[F; G](
   invZ.prod(invZ, invZ2, lazyReduce = true)
   aff.y.prod(jac.y, invZ)
 
+func affine_vartime*[F; G](
+       aff: var EC_ShortW_Aff[F, G],
+       jac: EC_ShortW_Jac[F, G]) {.tags:[VarTime], meter.} =
+  ## **Variable-time** Jacobian to affine conversion
+  ##
+  ## This MUST NOT be used with secret data.
+  var invZ {.noInit.}, invZ2{.noInit.}: F
+  invZ.inv_vartime(jac.z)
+  invZ2.square(invZ, lazyReduce = true)
+
+  aff.x.prod(jac.x, invZ2)
+  invZ.prod(invZ, invZ2, lazyReduce = true)
+  aff.y.prod(jac.y, invZ)
+
 func fromAffine*[F; G](
        jac: var EC_ShortW_Jac[F, G],
        aff: EC_ShortW_Aff[F, G]) {.inline.} =

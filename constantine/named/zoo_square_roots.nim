@@ -19,6 +19,7 @@ import
   ./constants/bandersnatch_sqrt,
   ./constants/banderwagon_sqrt,
   ./constants/pallas_sqrt,
+  ./constants/secp256k1_sqrt,
   ./constants/vesta_sqrt
 
 export
@@ -32,10 +33,11 @@ export
   bandersnatch_sqrt,
   banderwagon_sqrt,
   pallas_sqrt,
+  secp256k1_sqrt,
   vesta_sqrt
 
 func hasSqrtAddchain*(Name: static Algebra): static bool =
-  when Name in {BLS12_381, BN254_Nogami, BN254_Snarks, BW6_761, Edwards25519}:
+  when Name in {BLS12_381, BN254_Nogami, BN254_Snarks, BW6_761, Edwards25519, Secp256k1}:
     true
   else:
     false
