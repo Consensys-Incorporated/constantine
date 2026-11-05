@@ -338,9 +338,22 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   ## clang driver shim supplies the target flags + declaration-only headers. The
   ## freestanding stdio backing (stderr/fwrite/fflush/exit for the Nim runtime's OOM
   ## path) is compiled alongside and added to the archive.
+  ##
+  ## CTT_FIELD_ACCEL opts into the Lineth secp256k1 base field accelerator
+  ## (constantine/platforms/isa_riscv/lineth_secp256k1_fp.nim): `off` (default), `all`,
+  ## or a comma-separated subset of `mul` (with squaring), `inv` and `sqrt`.
   let wrapper = "constantine/platforms/clang-rv64-standalone.sh"
   let outdir = if existsEnv"CTT_OUTDIR": getEnv"CTT_OUTDIR" else: "lib"
   let nimcache = if existsEnv"CTT_NIMCACHE": getEnv"CTT_NIMCACHE" else: "nimcache/libconstantine_riscv64_freestanding"
+  let fieldAccelOps = if existsEnv"CTT_FIELD_ACCEL": getEnv"CTT_FIELD_ACCEL" else: "off"
+  var fieldAccel = ""
+  for op in (if fieldAccelOps == "all": "mul,inv,sqrt" else: fieldAccelOps).split(','):
+    case op.strip()
+    of "off", "": discard
+    of "mul": fieldAccel &= " -d:CTT_LINETH_SECP256K1_FP_MUL "
+    of "inv": fieldAccel &= " -d:CTT_LINETH_SECP256K1_FP_INV "
+    of "sqrt": fieldAccel &= " -d:CTT_LINETH_SECP256K1_FP_SQRT "
+    else: quit "CTT_FIELD_ACCEL: unknown operation '" & op & "', expected off, all, or a comma-separated subset of mul, inv, sqrt"
   exec "rm -rf " & nimcache
   exec "mkdir -p " & outdir
   let nim = if existsEnv"NIM": getEnv"NIM" else: "nim"
@@ -348,6 +361,7 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
        releaseBuildOptions(bmStaticLib) &
        " --cc:clang " &
        " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
+       fieldAccel &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
        " --threads:off " &
        " --noMain --app:staticlib " &

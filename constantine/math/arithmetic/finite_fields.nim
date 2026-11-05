@@ -32,7 +32,8 @@ import
   constantine/named/properties_fields,
   ./bigints,
   ./bigints_montgomery,
-  ./bigints_crandall
+  ./bigints_crandall,
+  constantine/platforms/isa_riscv/lineth_secp256k1_fp
 
 when UseASM_X86_64:
   import ./assembly/limbs_asm_modular_x86
@@ -268,14 +269,18 @@ func double*(r: var FF, a: FF) {.meter.} =
 func prod*(r: var FF, a, b: FF, lazyReduce: static bool = false) {.meter.} =
   ## Store the product of ``a`` by ``b`` modulo p into ``r``
   ## ``r`` is initialized / overwritten
-  when FF.isCrandallPrimeField():
+  when UseLinethSecp256k1FpMul and FF is Fp[Secp256k1]:
+    lineth_secp256k1_fp_mul(r.mres.limbs, a.mres.limbs, b.mres.limbs)
+  elif FF.isCrandallPrimeField():
     r.mres.mulCran(a.mres, b.mres, FF.getModulus(), FF.getCrandallPrimeSubterm(), lazyReduce)
   else:
     r.mres.mulMont(a.mres, b.mres, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits(), lazyReduce)
 
 func square*(r: var FF, a: FF, lazyReduce: static bool = false) {.meter.} =
   ## Squaring modulo p
-  when FF.isCrandallPrimeField():
+  when UseLinethSecp256k1FpMul and FF is Fp[Secp256k1]:
+    lineth_secp256k1_fp_square(r.mres.limbs, a.mres.limbs)
+  elif FF.isCrandallPrimeField():
     r.mres.squareCran(a.mres, FF.getModulus(), FF.getCrandallPrimeSubterm(), lazyReduce)
   else:
     r.mres.squareMont(a.mres, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits(), lazyReduce)
@@ -369,7 +374,9 @@ func inv*(r: var FF, a: FF) {.meter.} =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when FF.isCrandallPrimeField():
+  when UseLinethSecp256k1FpInv and FF is Fp[Secp256k1]:
+    lineth_secp256k1_fp_inv(r.mres.limbs, a.mres.limbs)
+  elif FF.isCrandallPrimeField():
     r.mres.invmod(a.mres, FF.getModulus())
   else:
     r.mres.invmod(a.mres, FF.getR2modP(), FF.getModulus())
@@ -390,7 +397,9 @@ func inv_vartime*(r: var FF, a: FF) {.meter, tags: [VarTime].} =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when FF.isCrandallPrimeField():
+  when UseLinethSecp256k1FpInv and FF is Fp[Secp256k1]:
+    lineth_secp256k1_fp_inv(r.mres.limbs, a.mres.limbs)
+  elif FF.isCrandallPrimeField():
     r.mres.invmod_vartime(a.mres, FF.getModulus())
   else:
     r.mres.invmod_vartime(a.mres, FF.getR2modP(), FF.getModulus())
