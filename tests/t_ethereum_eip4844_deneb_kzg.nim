@@ -31,44 +31,45 @@ const
   TestVectorsDir =
     currentSourcePath.rsplit(DirSep, 1)[0] / "protocol_ethereum_eip4844_deneb_kzg"
 
-TestVectorsDir.testGen(blob_to_kzg_commitment, "kzg-mainnet", testVector):
-  parseAssign(testVector, blob, BYTES_PER_BLOB, testVector["input"]["blob"].content)
+when not defined(CTT_KZG_VERIFICATION_ONLY):
+  TestVectorsDir.testGen(blob_to_kzg_commitment, "kzg-mainnet", testVector):
+    parseAssign(testVector, blob, BYTES_PER_BLOB, testVector["input"]["blob"].content)
 
-  var commitment: array[BYTES_PER_COMMITMENT, byte]
+    var commitment: array[BYTES_PER_COMMITMENT, byte]
 
-  let status = blob_to_kzg_commitment(ctx, commitment, blob[])
-  stdout.write "[" & $status & "]\n"
+    let status = blob_to_kzg_commitment(ctx, commitment, blob[])
+    stdout.write "[" & $status & "]\n"
 
-  if status == cttEthKzg_Success:
-    parseAssign(testVector, expectedCommit, BYTES_PER_COMMITMENT, testVector["output"].content)
-    doAssert bool(commitment == expectedCommit[]), block:
-      "\ncommitment: " & commitment.toHex() &
-      "\nexpected:   " & expectedCommit[].toHex() & "\n"
-  else:
-    doAssert testVector["output"].content == "null"
+    if status == cttEthKzg_Success:
+      parseAssign(testVector, expectedCommit, BYTES_PER_COMMITMENT, testVector["output"].content)
+      doAssert bool(commitment == expectedCommit[]), block:
+        "\ncommitment: " & commitment.toHex() &
+        "\nexpected:   " & expectedCommit[].toHex() & "\n"
+    else:
+      doAssert testVector["output"].content == "null"
 
-TestVectorsDir.testGen(compute_kzg_proof, "kzg-mainnet", testVector):
-  parseAssign(testVector, blob, BYTES_PER_BLOB, testVector["input"]["blob"].content)
-  parseAssign(testVector, z, BYTES_PER_FIELD_ELEMENT, testVector["input"]["z"].content)
+  TestVectorsDir.testGen(compute_kzg_proof, "kzg-mainnet", testVector):
+    parseAssign(testVector, blob, BYTES_PER_BLOB, testVector["input"]["blob"].content)
+    parseAssign(testVector, z, BYTES_PER_FIELD_ELEMENT, testVector["input"]["z"].content)
 
-  var proof: array[BYTES_PER_PROOF, byte]
-  var y: array[BYTES_PER_FIELD_ELEMENT, byte]
+    var proof: array[BYTES_PER_PROOF, byte]
+    var y: array[BYTES_PER_FIELD_ELEMENT, byte]
 
-  let status = compute_kzg_proof(ctx, proof, y, blob[], z[])
-  stdout.write "[" & $status & "]\n"
+    let status = compute_kzg_proof(ctx, proof, y, blob[], z[])
+    stdout.write "[" & $status & "]\n"
 
-  if status == cttEthKzg_Success:
-    parseAssign(testVector, expectedProof, BYTES_PER_PROOF, testVector["output"][0].content)
-    parseAssign(testVector, expectedEvalAtChallenge, BYTES_PER_FIELD_ELEMENT, testVector["output"][1].content)
+    if status == cttEthKzg_Success:
+      parseAssign(testVector, expectedProof, BYTES_PER_PROOF, testVector["output"][0].content)
+      parseAssign(testVector, expectedEvalAtChallenge, BYTES_PER_FIELD_ELEMENT, testVector["output"][1].content)
 
-    doAssert bool(proof == expectedProof[]), block:
-      "\nproof:    " & proof.toHex() &
-      "\nexpected: " & expectedProof[].toHex() & "\n"
-    doAssert bool(y == expectedEvalAtChallenge[]), block:
-      "\ny (= p(z)): " & y.toHex() &
-      "\nexpected:   " & expectedEvalAtChallenge[].toHex() & "\n"
-  else:
-    doAssert testVector["output"].content == "null"
+      doAssert bool(proof == expectedProof[]), block:
+        "\nproof:    " & proof.toHex() &
+        "\nexpected: " & expectedProof[].toHex() & "\n"
+      doAssert bool(y == expectedEvalAtChallenge[]), block:
+        "\ny (= p(z)): " & y.toHex() &
+        "\nexpected:   " & expectedEvalAtChallenge[].toHex() & "\n"
+    else:
+      doAssert testVector["output"].content == "null"
 
 TestVectorsDir.testGen(verify_kzg_proof, "kzg-mainnet", testVector):
   parseAssign(testVector, commitment, BYTES_PER_COMMITMENT, testVector["input"]["commitment"].content)
@@ -86,23 +87,24 @@ TestVectorsDir.testGen(verify_kzg_proof, "kzg-mainnet", testVector):
   else:
     doAssert testVector["output"].content == "null"
 
-TestVectorsDir.testGen(compute_blob_kzg_proof, "kzg-mainnet", testVector):
-  parseAssign(testVector, blob,  BYTES_PER_BLOB, testVector["input"]["blob"].content)
-  parseAssign(testVector, commitment, BYTES_PER_COMMITMENT, testVector["input"]["commitment"].content)
+when not defined(CTT_KZG_VERIFICATION_ONLY):
+  TestVectorsDir.testGen(compute_blob_kzg_proof, "kzg-mainnet", testVector):
+    parseAssign(testVector, blob,  BYTES_PER_BLOB, testVector["input"]["blob"].content)
+    parseAssign(testVector, commitment, BYTES_PER_COMMITMENT, testVector["input"]["commitment"].content)
 
-  var proof: array[BYTES_PER_PROOF, byte]
+    var proof: array[BYTES_PER_PROOF, byte]
 
-  let status = compute_blob_kzg_proof(ctx, proof, blob[], commitment[])
-  stdout.write "[" & $status & "]\n"
+    let status = compute_blob_kzg_proof(ctx, proof, blob[], commitment[])
+    stdout.write "[" & $status & "]\n"
 
-  if status == cttEthKzg_Success:
-    parseAssign(testVector, expectedProof, BYTES_PER_PROOF, testVector["output"].content)
+    if status == cttEthKzg_Success:
+      parseAssign(testVector, expectedProof, BYTES_PER_PROOF, testVector["output"].content)
 
-    doAssert bool(proof == expectedProof[]), block:
-      "\nproof:    " & proof.toHex() &
-      "\nexpected: " & expectedProof[].toHex() & "\n"
-  else:
-    doAssert testVector["output"].content == "null"
+      doAssert bool(proof == expectedProof[]), block:
+        "\nproof:    " & proof.toHex() &
+        "\nexpected: " & expectedProof[].toHex() & "\n"
+    else:
+      doAssert testVector["output"].content == "null"
 
 TestVectorsDir.testGen(verify_blob_kzg_proof, "kzg-mainnet", testVector):
   parseAssign(testVector, blob,  BYTES_PER_BLOB, testVector["input"]["blob"].content)
@@ -163,17 +165,19 @@ block:
   suite "Ethereum Deneb Hardfork / EIP-4844 / Proto-Danksharding / KZG Polynomial Commitments":
     let ctx = getTrustedSetup()
 
-    test "blob_to_kzg_commitment(dst: var array[BYTES_PER_COMMITMENT, byte], blob: ptr array[4096, byte])":
-      ctx.test_blob_to_kzg_commitment()
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      test "blob_to_kzg_commitment(dst: var array[BYTES_PER_COMMITMENT, byte], blob: ptr array[4096, byte])":
+        ctx.test_blob_to_kzg_commitment()
 
-    test "compute_kzg_proof(proof: var array[BYTES_PER_PROOF, byte], y: var array[32, byte], blob: ptr array[4096, byte], z: array[32, byte])":
-      ctx.test_compute_kzg_proof()
+      test "compute_kzg_proof(proof: var array[BYTES_PER_PROOF, byte], y: var array[32, byte], blob: ptr array[4096, byte], z: array[32, byte])":
+        ctx.test_compute_kzg_proof()
 
     test "verify_kzg_proof(commitment: array[BYTES_PER_COMMITMENT, byte], z, y: array[32, byte], proof: array[BYTES_PER_PROOF, byte]) -> bool":
       ctx.test_verify_kzg_proof()
 
-    test "compute_blob_kzg_proof(proof: var array[BYTES_PER_PROOF, byte], blob: ptr array[4096, byte], commitment: array[BYTES_PER_COMMITMENT, byte])":
-      ctx.test_compute_blob_kzg_proof()
+    when not defined(CTT_KZG_VERIFICATION_ONLY):
+      test "compute_blob_kzg_proof(proof: var array[BYTES_PER_PROOF, byte], blob: ptr array[4096, byte], commitment: array[BYTES_PER_COMMITMENT, byte])":
+        ctx.test_compute_blob_kzg_proof()
 
     test "verify_blob_kzg_proof(blob: ptr array[4096, byte], commitment: array[BYTES_PER_COMMITMENT, byte], proof: array[BYTES_PER_PROOF, byte])":
       ctx.test_verify_blob_kzg_proof()
