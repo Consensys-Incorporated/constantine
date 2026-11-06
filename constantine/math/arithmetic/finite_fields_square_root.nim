@@ -10,6 +10,7 @@ import
   constantine/platforms/abstractions,
   constantine/named/algebras,
   constantine/named/zoo_square_roots,
+  constantine/platforms/isa_riscv/lineth_secp256k1_fp,
   ./finite_fields_square_root_precomp,
   ./bigints, ./finite_fields, ./limbs_exgcd
 
@@ -246,9 +247,12 @@ func sqrt*[Name](a: var Fp[Name]) =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  var t {.noInit.}: Fp[Name]
-  t.invsqrt(a)
-  a *= t
+  when UseLinethSecp256k1FpSqrt and Name == Secp256k1:
+    discard lineth_secp256k1_fp_sqrt(a.mres.limbs, a.mres.limbs)
+  else:
+    var t {.noInit.}: Fp[Name]
+    t.invsqrt(a)
+    a *= t
 
 func sqrt_vartime*[Name](a: var Fp[Name]) =
   ## Compute the square root of ``a``
@@ -258,9 +262,12 @@ func sqrt_vartime*[Name](a: var Fp[Name]) =
   ## The result is undefined otherwise
   ##
   ## This is NOT constant-time
-  var t {.noInit.}: Fp[Name]
-  t.invsqrt_vartime(a)
-  a *= t
+  when UseLinethSecp256k1FpSqrt and Name == Secp256k1:
+    discard lineth_secp256k1_fp_sqrt(a.mres.limbs, a.mres.limbs)
+  else:
+    var t {.noInit.}: Fp[Name]
+    t.invsqrt_vartime(a)
+    a *= t
 
 func sqrt_invsqrt*[Name](sqrt, invsqrt: var Fp[Name], a: Fp[Name]) =
   ## Compute the square root and inverse square root of ``a``
@@ -322,9 +329,12 @@ func sqrt_if_square*[Name](a: var Fp[Name]): SecretBool =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
-  result = sqrt_invsqrt_if_square(sqrt, invsqrt, a)
-  a = sqrt
+  when UseLinethSecp256k1FpSqrt and Name == Secp256k1:
+    result = lineth_secp256k1_fp_sqrt(a.mres.limbs, a.mres.limbs)
+  else:
+    var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
+    result = sqrt_invsqrt_if_square(sqrt, invsqrt, a)
+    a = sqrt
 
 func sqrt_if_square_vartime*[Name](a: var Fp[Name]): SecretBool =
   ## If ``a`` is a square, compute the square root of ``a``
@@ -335,9 +345,12 @@ func sqrt_if_square_vartime*[Name](a: var Fp[Name]): SecretBool =
   ## This procedure returns a deterministic result
   ##
   ## This is NOT constant-time
-  var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
-  result = sqrt_invsqrt_if_square_vartime(sqrt, invsqrt, a)
-  a = sqrt
+  when UseLinethSecp256k1FpSqrt and Name == Secp256k1:
+    result = lineth_secp256k1_fp_sqrt(a.mres.limbs, a.mres.limbs)
+  else:
+    var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
+    result = sqrt_invsqrt_if_square_vartime(sqrt, invsqrt, a)
+    a = sqrt
 
 func invsqrt_if_square*[Name](r: var Fp[Name], a: Fp[Name]): SecretBool =
   ## If ``a`` is a square, compute the inverse square root of ``a``
