@@ -19,6 +19,8 @@ for symbol in \
   ctt_eth_zkvm_secp256k1_verify \
   ctt_eth_zkvm_secp256k1_ecrecover \
   ctt_eth_kzg_context_new_embedded \
+  ctt_eth_kzg_verify_blob_kzg_proof \
+  ctt_eth_kzg_verify_blob_kzg_proof_batch \
   ctt_eth_evm_kzg_point_evaluation
 do
   if ! printf '%s\n' "$SYMBOLS" | awk -v symbol="$symbol" '$NF == symbol { found = 1 } END { exit !found }'; then

@@ -155,6 +155,41 @@ func fiatShamirChallenge(
   transcript.finish(opening_challenge)
   dst[].fromDigest(opening_challenge)
 
+func fiatShamirBatchBlindingFactor(
+       dst: var Fr[BLS12_381],
+       commitments_bytes: ptr UncheckedArray[array[BYTES_PER_COMMITMENT, byte]],
+       opening_challenges: ptr UncheckedArray[Fr[BLS12_381]],
+       evals_at_challenges: ptr UncheckedArray[Fr[BLS12_381].getBigInt()],
+       proofs_bytes: ptr UncheckedArray[array[BYTES_PER_PROOF, byte]],
+       n: int) =
+  ## Compute the blinding factor of a batch verification from all the verification sets.
+  ## The proofs are part of the transcript, so a prover cannot choose them after seeing the blinding factor.
+  ##
+  ## verify_kzg_proof_batch: https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/deneb/polynomial-commitments.md#verify_kzg_proof_batch
+  ##   data = RANDOM_CHALLENGE_KZG_BATCH_DOMAIN ‖ uint64_be(FIELD_ELEMENTS_PER_BLOB) ‖ uint64_be(n)
+  ##          ‖ (commitmentᵢ ‖ zᵢ ‖ yᵢ ‖ proofᵢ for i in [0, n))
+  ##   r = hash_to_bls_field(sha256(data))
+  var transcript {.noInit.}: sha256
+  transcript.init()
+
+  transcript.update(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN)
+  transcript.update(FIELD_ELEMENTS_PER_BLOB.uint64.toBytes(bigEndian))
+  transcript.update(n.uint64.toBytes(bigEndian))
+
+  for i in 0 ..< n:
+    var z {.noInit.}, y {.noInit.}: array[BYTES_PER_FIELD_ELEMENT, byte]
+    z.marshal(opening_challenges[i], bigEndian)
+    y.marshal(evals_at_challenges[i], bigEndian)
+
+    transcript.update(commitments_bytes[i])
+    transcript.update(z)
+    transcript.update(y)
+    transcript.update(proofs_bytes[i])
+
+  var digest {.noInit.}: array[32, byte]
+  transcript.finish(digest)
+  dst.fromDigest(digest)
+
 func getBatchBlindingFactor(
        dst: var Fr[BLS12_381],
        secureRandomBytes: array[32, byte]): bool =
@@ -460,7 +495,7 @@ func verify_blob_kzg_proof*(
        ctx: ptr EthereumKZGContext,
        blob: Blob,
        commitment_bytes: array[48, byte],
-       proof_bytes: array[48, byte]): cttEthKzgStatus {.fullKzgApi: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
+       proof_bytes: array[48, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
   ## Given a blob and a KZG proof, verify that the blob data corresponds to the provided commitment.
 
   var commitment {.noInit.}: KZGCommitment
@@ -500,7 +535,7 @@ func verify_blob_kzg_proof_batch*(
        commitments_bytes: ptr UncheckedArray[array[48, byte]],
        proof_bytes: ptr UncheckedArray[array[48, byte]],
        n: int,
-       secureRandomBytes: array[32, byte]): cttEthKzgStatus {.fullKzgApi: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
+       secureRandomBytes: array[32, byte]): cttEthKzgStatus {.libPrefix: prefix_eth_kzg, tags:[Alloca, HeapAlloc, Vartime].} =
   ## Verify `n` (blob, commitment, proof) sets efficiently
   ##
   ## `n` is the number of verifications set
@@ -513,6 +548,10 @@ func verify_blob_kzg_proof_batch*(
   ## that is not in the control of a potential attacker to prevent potential
   ## rogue commitments attacks due to homomorphic properties of pairings,
   ## i.e. commitments that are linear combination of others and sum would be zero.
+  ##
+  ## If `secureRandomBytes` is all zeros, the random number is derived
+  ## through the Fiat-Shamir heuristic from all the (blob, commitment, proof) sets
+  ## as in the consensus specs' `verify_blob_kzg_proof_batch`, and the result is deterministic.
 
   if n < 0:
     return cttEthKzg_VerificationFailure
@@ -541,19 +580,14 @@ func verify_blob_kzg_proof_batch*(
       check HappyPath, proofs[i].bytes_to_kzg_proof(proof_bytes[i])
 
     var randomBlindingFr {.noInit.}: Fr[BLS12_381]
-    if not randomBlindingFr.getBatchBlindingFactor(secureRandomBytes):
-      # Fall back: hash all the Fiat-Shamir challenges
-      var transcript: sha256
-      transcript.init()
-      transcript.update(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN)
-      transcript.update(cast[ptr UncheckedArray[byte]](opening_challenges).toOpenArray(0, n*sizeof(Fr[BLS12_381])-1))
-
-      var blindingBytes {.noInit.}: array[32, byte]
-      transcript.finish(blindingBytes)
-      randomBlindingFr.fromDigest(blindingBytes)
-
     let linearIndepRandNumbers = allocHeapArrayAligned(Fr[BLS12_381], n, alignment = 64)
-    linearIndepRandNumbers.computePowers(randomBlindingFr, n, skipOne = true)
+    if randomBlindingFr.getBatchBlindingFactor(secureRandomBytes):
+      linearIndepRandNumbers.computePowers(randomBlindingFr, n, skipOne = true)
+    else:
+      # Fall back to the consensus specs' derivation: r from all the verification sets, coefficients r⁰ .. rⁿ⁻¹
+      randomBlindingFr.fiatShamirBatchBlindingFactor(
+        commitments_bytes, opening_challenges, evals_at_challenges, proof_bytes, n)
+      linearIndepRandNumbers.computePowers(randomBlindingFr, n)
 
     type EcAffArray = ptr UncheckedArray[EC_ShortW_Aff[Fp[BLS12_381], G1]]
     let verif = kzg_verify_batch(

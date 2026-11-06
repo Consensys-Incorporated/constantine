@@ -385,6 +385,10 @@ task test_kzg_embedded_verification_only, "Test the verification-only embedded K
        " --outdir:build/test_suite " &
        " --nimcache:nimcache/tests/t_ethereum_evm_kzg_embedded " &
        " tests/t_ethereum_evm_kzg_embedded.nim"
+  exec "nim c -r -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
+       " --outdir:build/test_suite " &
+       " --nimcache:nimcache/tests/t_ethereum_kzg_embedded_verification_only " &
+       " tests/t_ethereum_kzg_embedded_verification_only.nim"
 
 task make_zkalc, "Build a benchmark executable for zkalc (with Clang)":
   exec "nim c --cc:clang " &
@@ -699,6 +703,7 @@ const testDesc: seq[tuple[path: string, useGMP: bool]] = @[
   ("tests/t_ethereum_bls_signatures.nim", false),
   ("tests/t_ethereum_eip2333_bls12381_key_derivation.nim", false),
   ("tests/t_ethereum_eip4844_deneb_kzg.nim", false),
+  ("tests/t_ethereum_eip4844_kzg_batch_blinding.nim", false),
   ("tests/t_ethereum_eip4844_deneb_kzg_parallel.nim", false),
   ("tests/t_eth_eip7594_peerdas.nim", false),
   ("tests/t_ethereum_verkle_primitives.nim", false),
@@ -956,6 +961,9 @@ proc addEmbeddedKzgTests(cmdFile: var string) =
   cmdFile.testBatch(
     " -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY ",
     "tests/t_ethereum_evm_kzg_embedded.nim")
+  cmdFile.testBatch(
+    " -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY ",
+    "tests/t_ethereum_kzg_embedded_verification_only.nim")
 
 proc addTestSetNvidia(cmdFile: var string) =
   if not dirExists "build":
