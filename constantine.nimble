@@ -338,16 +338,23 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   ## clang driver shim supplies the target flags + declaration-only headers. The
   ## freestanding stdio backing (stderr/fwrite/fflush/exit for the Nim runtime's OOM
   ## path) is compiled alongside and added to the archive.
+  ##
+  ## CTT_EXTERN_FIELD_ACCEL=1 delegates some field operations to the extern
+  ## `lineth_zkvm_field_op`, which the final link must provide
+  ## (constantine/math/arithmetic/finite_fields_extern.nim).
   let wrapper = "constantine/platforms/clang-rv64-standalone.sh"
   let outdir = if existsEnv"CTT_OUTDIR": getEnv"CTT_OUTDIR" else: "lib"
   let nimcache = if existsEnv"CTT_NIMCACHE": getEnv"CTT_NIMCACHE" else: "nimcache/libconstantine_riscv64_freestanding"
   exec "rm -rf " & nimcache
   exec "mkdir -p " & outdir
   let nim = if existsEnv"NIM": getEnv"NIM" else: "nim"
+  let fieldAccel = if getEnv"CTT_EXTERN_FIELD_ACCEL" in ["", "0", "false", "off"]: ""
+                   else: " -d:CTT_EXTERN_FIELD_ACCEL "
   exec nim & " c " &
        releaseBuildOptions(bmStaticLib) &
        " --cc:clang " &
        " --cpu:riscv64 --os:standalone -d:noSignalHandler -d:CTT_EMBEDDED_KZG -d:CTT_KZG_VERIFICATION_ONLY " &
+       fieldAccel &
        " --clang.exe:" & wrapper & " --clang.linkerexe:" & wrapper &
        " --threads:off " &
        " --noMain --app:staticlib " &
