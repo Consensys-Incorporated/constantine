@@ -492,3 +492,12 @@ func montyResidue_precompute*(r: var BigInt, a, M, r2modM: BigInt,
   ## to a the Montgomery n-residue representation
   ## This is intended for compile-time precomputations-only
   mulMont_precompute(r, a, r2ModM, M, m0ninv)
+
+func canonicalResidue_precompute*(r: var BigInt, a, M, r2modM: BigInt,
+                                  m0ninv: BaseType) =
+  ## Reduce a bigint ``a`` modulo ``M`` in natural [0, M) representation
+  ## This is intended for compile-time precomputations-only
+  var tmp, one: typeof(M)
+  one.limbs[0] = SecretWord(1)
+  mulMont_precompute(tmp, a, r2ModM, M, m0ninv)
+  mulMont_precompute(r, tmp, one, M, m0ninv)

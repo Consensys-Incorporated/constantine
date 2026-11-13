@@ -208,7 +208,11 @@ func invsqrt*[Name](r: var Fp[Name], a: Fp[Name]) =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  when Name.has_P_3mod4_primeModulus():
+  when Fp[Name].hasExtFieldSqrt():
+    var s {.noInit.}: Fp[Name]
+    discard s.extFieldSqrt(a)
+    r.inv(s)
+  elif Name.has_P_3mod4_primeModulus():
     r.invsqrt_p3mod4(a)
   elif Name.has_P_5mod8_primeModulus():
     r.invsqrt_p5mod8(a)
@@ -227,7 +231,11 @@ func invsqrt_vartime*[Name](r: var Fp[Name], a: Fp[Name]) =
   ## This procedure returns a deterministic result
   ##
   ## This procedure is NOT constant-time
-  when Name.has_P_3mod4_primeModulus():
+  when Fp[Name].hasExtFieldSqrt():
+    var s {.noInit.}: Fp[Name]
+    discard s.extFieldSqrt(a)
+    r.inv(s)
+  elif Name.has_P_3mod4_primeModulus():
     r.invsqrt_p3mod4(a)
   elif Name.has_P_5mod8_primeModulus():
     r.invsqrt_p5mod8(a)

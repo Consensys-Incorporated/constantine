@@ -13,6 +13,7 @@ import
   constantine/named/algebras,
   ./math/[arithmetic, extension_fields],
   ./math/arithmetic/limbs_montgomery,
+  ./math/arithmetic/finite_fields_extern,
   ./math/ec_shortweierstrass,
   ./math/elliptic/ec_multi_scalar_mul,
   ./math/pairings/[pairings_generic, miller_accumulators],
@@ -525,13 +526,15 @@ func eth_evm_bn254_g1mul*(r: var openArray[byte], inputs: openarray[byte]): CttE
     # which is 31.5% faster than plain windowed scalar multiplication
     # at the low cost of a modular reduction.
 
-    # Due to mismatch between the BigInt[256] input and the rest being BigInt[254]
-    # we use the low-level getMont instead of 'fromBig'
-    getMont(smod.mres.limbs, s.limbs,
-                Fr[BN254_Snarks].getModulus().limbs,
-                Fr[BN254_Snarks].getR2modP().limbs,
-                Fr[BN254_Snarks].getNegInvModWord(),
-                Fr[BN254_Snarks].getSpareBits())
+    # Reduce s modulo r canonically (handles BigInt[256] -> BigInt[254]).
+    when Fr[BN254_Snarks].hasExtFieldMul():
+      smod.extFieldFromLimbs4(s.limbs)
+    else:
+      getMont(smod.mres.limbs, s.limbs,
+                  Fr[BN254_Snarks].getModulus().limbs,
+                  Fr[BN254_Snarks].getR2modP().limbs,
+                  Fr[BN254_Snarks].getNegInvModWord(),
+                  Fr[BN254_Snarks].getSpareBits())
     P.scalarMul_vartime(smod.toBig())
   else:
     P.scalarMul_vartime(s)
@@ -797,13 +800,15 @@ func eth_evm_bls12381_g1mul*(r: var openArray[byte], inputs: openarray[byte]): C
     # This allows to use windowed endomorphism acceleration
     # at the low cost of a modular reduction.
 
-    # Due to mismatch between the BigInt[256] input and the rest being BigInt[255]
-    # we use the low-level getMont instead of 'fromBig'
-    getMont(smod.mres.limbs, s.limbs,
-                Fr[BLS12_381].getModulus().limbs,
-                Fr[BLS12_381].getR2modP().limbs,
-                Fr[BLS12_381].getNegInvModWord(),
-                Fr[BLS12_381].getSpareBits())
+    # Reduce s modulo r canonically (handles BigInt[256] -> BigInt[255]).
+    when Fr[BLS12_381].hasExtFieldMul():
+      smod.extFieldFromLimbs4(s.limbs)
+    else:
+      getMont(smod.mres.limbs, s.limbs,
+                  Fr[BLS12_381].getModulus().limbs,
+                  Fr[BLS12_381].getR2modP().limbs,
+                  Fr[BLS12_381].getNegInvModWord(),
+                  Fr[BLS12_381].getSpareBits())
     P.scalarMul_vartime(smod.toBig())
   else:
     P.scalarMul_vartime(s)
@@ -867,13 +872,15 @@ func eth_evm_bls12381_g2mul*(r: var openArray[byte], inputs: openarray[byte]): C
     # This allows to use windowed endomorphism acceleration
     # at the low cost of a modular reduction.
 
-    # Due to mismatch between the BigInt[256] input and the rest being BigInt[255]
-    # we use the low-level getMont instead of 'fromBig'
-    getMont(smod.mres.limbs, s.limbs,
-                Fr[BLS12_381].getModulus().limbs,
-                Fr[BLS12_381].getR2modP().limbs,
-                Fr[BLS12_381].getNegInvModWord(),
-                Fr[BLS12_381].getSpareBits())
+    # Reduce s modulo r canonically (handles BigInt[256] -> BigInt[255]).
+    when Fr[BLS12_381].hasExtFieldMul():
+      smod.extFieldFromLimbs4(s.limbs)
+    else:
+      getMont(smod.mres.limbs, s.limbs,
+                  Fr[BLS12_381].getModulus().limbs,
+                  Fr[BLS12_381].getR2modP().limbs,
+                  Fr[BLS12_381].getNegInvModWord(),
+                  Fr[BLS12_381].getSpareBits())
     P.scalarMul_vartime(smod.toBig())
   else:
     P.scalarMul_vartime(s)
@@ -946,13 +953,15 @@ func eth_evm_bls12381_g1msm*(r: var openArray[byte], inputs: openarray[byte]): C
       # This allows to use windowed endomorphism acceleration
       # at the low cost of a modular reduction.
 
-      # Due to mismatch between the BigInt[256] input and the rest being BigInt[255]
-      # we use the low-level getMont instead of 'fromBig'
-      getMont(smod.mres.limbs, s.limbs,
-                  Fr[BLS12_381].getModulus().limbs,
-                  Fr[BLS12_381].getR2modP().limbs,
-                  Fr[BLS12_381].getNegInvModWord(),
-                  Fr[BLS12_381].getSpareBits())
+      # Reduce s modulo r canonically (handles BigInt[256] -> BigInt[255]).
+      when Fr[BLS12_381].hasExtFieldMul():
+        smod.extFieldFromLimbs4(s.limbs)
+      else:
+        getMont(smod.mres.limbs, s.limbs,
+                    Fr[BLS12_381].getModulus().limbs,
+                    Fr[BLS12_381].getR2modP().limbs,
+                    Fr[BLS12_381].getNegInvModWord(),
+                    Fr[BLS12_381].getSpareBits())
 
       coefs_big[i].fromField(smod)
 
@@ -1031,13 +1040,15 @@ func eth_evm_bls12381_g2msm*(r: var openArray[byte], inputs: openarray[byte]): C
       # This allows to use windowed endomorphism acceleration
       # at the low cost of a modular reduction.
 
-      # Due to mismatch between the BigInt[256] input and the rest being BigInt[255]
-      # we use the low-level getMont instead of 'fromBig'
-      getMont(smod.mres.limbs, s.limbs,
-                  Fr[BLS12_381].getModulus().limbs,
-                  Fr[BLS12_381].getR2modP().limbs,
-                  Fr[BLS12_381].getNegInvModWord(),
-                  Fr[BLS12_381].getSpareBits())
+      # Reduce s modulo r canonically (handles BigInt[256] -> BigInt[255]).
+      when Fr[BLS12_381].hasExtFieldMul():
+        smod.extFieldFromLimbs4(s.limbs)
+      else:
+        getMont(smod.mres.limbs, s.limbs,
+                    Fr[BLS12_381].getModulus().limbs,
+                    Fr[BLS12_381].getR2modP().limbs,
+                    Fr[BLS12_381].getNegInvModWord(),
+                    Fr[BLS12_381].getSpareBits())
 
       coefs_big[i].fromField(smod)
 

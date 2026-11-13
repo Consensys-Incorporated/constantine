@@ -504,7 +504,8 @@ proc main_anti_regression =
       let expected = BigInt[255].fromDecimal("10920338887063814464675503992315976177888879664585288394250266608035967270910")
       var aa = Fr[BLS12_381].fromBig(a)
 
-      doAssert bool(aa.mres.isOne())
+      when not Fr[BLS12_381].isPlainRepField():
+        doAssert bool(aa.mres.isOne())
       aa.inv_vartime()
       check: bool(aa.toBig() == expected)
 

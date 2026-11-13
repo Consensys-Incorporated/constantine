@@ -8,7 +8,7 @@
 
 import
   constantine/platforms/abstractions,
-  constantine/named/[algebras, properties_fields],
+  constantine/named/properties_fields,
   ./bigints
 
 # ############################################################
@@ -29,7 +29,8 @@ import
 #   op    0 MUL   out = a*b
 #         1 DIV   out = a/b, 0 if b = 0                   (status 1 if b = 0)
 #         2 SQRT  out² = a, or out² = -a if a is not a square (status 1)
-#   field 1 Fp[Secp256k1]   2 Fr[Secp256k1]
+#   field 1 Fp[Secp256k1]   2 Fr[Secp256k1]   5 Fp[BN254_Snarks]
+#         6 Fr[BN254_Snarks]   7 Fr[BLS12_381]
 #
 # Operands are the 4 little-endian 64-bit limbs of the plain (not Montgomery)
 # value, below 2p. The output is reduced and may alias an input; b is read for
@@ -37,8 +38,8 @@ import
 # either root.
 #
 # Constantine maps its operations onto these as follows:
-#   - Crandall fields store plain values: prod/square are MUL, inv is DIV(1, a),
-#     sqrt is SQRT.
+#   - Fields with hasExtFieldMul store plain values in [0, p): prod/square are
+#     MUL, inv is DIV(1, a), sqrt is SQRT.
 #   - Montgomery fields store aR: inv is DIV(R², aR) = a⁻¹R, as invmod does.
 #     Products and square roots stay in software (they would need 2 calls).
 
@@ -51,22 +52,31 @@ const
   ExtFieldDiv = 1'u32
   ExtFieldSqrt = 2'u32
 
-template extFieldId(F: type FF): uint32 =
+template extFieldId*(F: type FF): uint32 =
   when F is Fp[Secp256k1]: 1'u32
   elif F is Fr[Secp256k1]: 2'u32
+  elif F is Fp[BN254_Snarks]: 5'u32
+  elif F is Fr[BN254_Snarks]: 6'u32
+  elif F is Fr[BLS12_381]: 7'u32
   else: 0'u32
 
 template hasExtFieldInv*(F: type FF): static bool =
   ## Inversion goes through the external accelerator
-  CTT_EXTERN_FIELD_ACCEL and F.extFieldId() != 0
+  CTT_EXTERN_FIELD_ACCEL and WordBitWidth == 64 and F.extFieldId() != 0
 
 template hasExtFieldMul*(F: type FF): static bool =
-  ## Multiplication and squaring go through the external accelerator
-  F.hasExtFieldInv() and F.isCrandallPrimeField()
+  ## Multiplication and squaring go through the external accelerator.
+  ## Such fields store plain values in [0, p).
+  CTT_EXTERN_FIELD_ACCEL and WordBitWidth == 64 and F.extFieldId() != 0
 
 template hasExtFieldSqrt*(F: type FF): static bool =
   ## Square roots go through the external accelerator
-  F.hasExtFieldMul() and (F.getModulus().limbs[0].BaseType and 3) == 3
+  F is Fp and F.hasExtFieldMul() and (F.getModulus().limbs[0].BaseType and 3) == 3
+
+template isPlainRepField*(F: type FF): static bool =
+  ## True if the field stores canonical plain values in [0, p)
+  ## instead of Montgomery residues.
+  F.isCrandallPrimeField() or F.hasExtFieldMul()
 
 {.push raises: [], inline.}
 
@@ -81,7 +91,7 @@ func extFieldProd*[F: FF](r: var F, a, b: F) =
 func extFieldInv*[F: FF](r: var F, a: F) =
   ## r <- a⁻¹, 0 if a = 0
   var num {.noInit.}: F
-  when F.isCrandallPrimeField():
+  when F.hasExtFieldMul():
     num.mres.setOne()
   else:
     num.mres = F.getR2modP()
@@ -90,5 +100,30 @@ func extFieldInv*[F: FF](r: var F, a: F) =
 func extFieldSqrt*[F: FF](r: var F, a: F): SecretBool =
   ## r <- √a if a is a square (returns true), else √-a (returns false)
   not extFieldOp(ExtFieldSqrt, r, a, a)
+
+func extFieldFromLimbs4*[F: FF](r: var F, limbs: array[4, SecretWord]) =
+  ## Reduce an arbitrary 4-limb (256-bit) unsigned integer modulo p into plain [0, p).
+  static:
+    doAssert F.hasExtFieldMul()
+    doAssert r.mres.limbs.len == 4
+  when F.getSpareBits() == 0:
+    # p > 2^255 (Secp256k1 Fp/Fr): any 256-bit integer is < 2p
+    r.mres.limbs = limbs
+    discard r.mres.csub(F.getModulus(), not(r.mres < F.getModulus()))
+  else:
+    # 2^129 < p < 2^255 (BN254 Fp/Fr, BLS12-381 Fr):
+    # limbs = lo_128 + hi_128 * 2^128, with lo_128, hi_128, 2^128 all < p.
+    static: doAssert F.bits() > 129
+    var lo128, hi128, two128: F
+    lo128.mres.limbs[0] = limbs[0]
+    lo128.mres.limbs[1] = limbs[1]
+    hi128.mres.limbs[0] = limbs[2]
+    hi128.mres.limbs[1] = limbs[3]
+    two128.mres.limbs[2] = SecretWord(1)
+    var prodHi {.noInit.}: F
+    prodHi.extFieldProd(hi128, two128)
+    var overflowed = r.mres.sum(prodHi.mres, lo128.mres)
+    overflowed = overflowed or not(r.mres < F.getModulus())
+    discard r.mres.csub(F.getModulus(), overflowed)
 
 {.pop.}

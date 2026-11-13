@@ -9,7 +9,8 @@
 import
   constantine/platforms/abstractions,
   constantine/named/algebras,
-  constantine/math/arithmetic
+  constantine/math/arithmetic,
+  constantine/math/arithmetic/finite_fields_extern
 
 export Fp
 
@@ -1341,10 +1342,13 @@ func square_disjoint*[F](r: var QuadraticExt[F], a0, a1: F) =
 func square*(r: var QuadraticExt, a: QuadraticExt) =
   when r.fromComplexExtension():
     when UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem() and r.typeof.has1extraBit():
-      if ({.noSideEffect.}: hasAdx()):
-        r.coords.sqrx_complex_sparebit_asm_adx(a.coords)
-      else:
+      when Fp[QuadraticExt.Name].hasExtFieldMul():
         r.square_complex(a)
+      else:
+        if ({.noSideEffect.}: hasAdx()):
+          r.coords.sqrx_complex_sparebit_asm_adx(a.coords)
+        else:
+          r.square_complex(a)
     else:
       r.square_complex(a)
   else:
@@ -1366,13 +1370,19 @@ func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
 
   when r.fromComplexExtension():
     when UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem():
-      if ({.noSideEffect.}: hasAdx()):
-        r.coords.mul_fp2_complex_asm_adx(a.coords, b.coords)
-      else:
+      when Fp[QuadraticExt.Name].hasExtFieldMul():
         var d {.noInit.}: doublePrec(typeof(r))
         d.prod2x_complex(a, b)
         r.c0.redc2x(d.c0)
         r.c1.redc2x(d.c1)
+      else:
+        if ({.noSideEffect.}: hasAdx()):
+          r.coords.mul_fp2_complex_asm_adx(a.coords, b.coords)
+        else:
+          var d {.noInit.}: doublePrec(typeof(r))
+          d.prod2x_complex(a, b)
+          r.c0.redc2x(d.c0)
+          r.c1.redc2x(d.c1)
     else:
       var d {.noInit.}: doublePrec(typeof(r))
       d.prod2x_complex(a, b)
