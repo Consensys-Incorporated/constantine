@@ -119,7 +119,7 @@ func fromDigest(dst: var Fr[BLS12_381], src: array[32, byte]) =
 
   # Reduce scalar modulo r canonically (handles BigInt[256] -> BigInt[255]).
   when Fr[BLS12_381].hasExtFieldMul():
-    dst.extFieldFromLimbs4(scalar.limbs)
+    dst.extFieldFromLimbs(scalar.limbs)
   else:
     getMont(dst.mres.limbs, scalar.limbs,
             Fr[BLS12_381].getModulus().limbs,

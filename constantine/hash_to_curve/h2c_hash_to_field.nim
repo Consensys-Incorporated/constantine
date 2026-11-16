@@ -226,13 +226,14 @@ func hashToField*[Field; count: static int](
       # Reduces modulo p into the field's internal representation
       when m == 1:
         when Fp[Field.Name].hasExtFieldMul():
-          var loLimbs, hiLimbs: array[4, SecretWord]
-          for k in 0 ..< 4:
+          const N = Fp[Field.Name].mres.limbs.len
+          var loLimbs, hiLimbs: array[N, SecretWord]
+          for k in 0 ..< N:
             loLimbs[k] = big2x.limbs[k]
-            hiLimbs[k] = big2x.limbs[k + 4]
+            hiLimbs[k] = big2x.limbs[k + N]
           var loF {.noInit.}, hiF {.noInit.}, Rmodp {.noInit.}, t {.noInit.}: Fp[Field.Name]
-          loF.extFieldFromLimbs4(loLimbs)
-          hiF.extFieldFromLimbs4(hiLimbs)
+          loF.extFieldFromLimbs(loLimbs)
+          hiF.extFieldFromLimbs(hiLimbs)
           Rmodp.mres = Fp[Field.Name].getMontyOne()
           t.prod(hiF, Rmodp)
           output[i].sum(loF, t)
@@ -245,13 +246,14 @@ func hashToField*[Field; count: static int](
 
       else:
         when Fp[Field.Name].hasExtFieldMul():
-          var loLimbs, hiLimbs: array[4, SecretWord]
-          for k in 0 ..< 4:
+          const N = Fp[Field.Name].mres.limbs.len
+          var loLimbs, hiLimbs: array[N, SecretWord]
+          for k in 0 ..< N:
             loLimbs[k] = big2x.limbs[k]
-            hiLimbs[k] = big2x.limbs[k + 4]
+            hiLimbs[k] = big2x.limbs[k + N]
           var loF {.noInit.}, hiF {.noInit.}, Rmodp {.noInit.}, t {.noInit.}: Fp[Field.Name]
-          loF.extFieldFromLimbs4(loLimbs)
-          hiF.extFieldFromLimbs4(hiLimbs)
+          loF.extFieldFromLimbs(loLimbs)
+          hiF.extFieldFromLimbs(hiLimbs)
           Rmodp.mres = Fp[Field.Name].getMontyOne()
           t.prod(hiF, Rmodp)
           output[i].coords[j].sum(loF, t)

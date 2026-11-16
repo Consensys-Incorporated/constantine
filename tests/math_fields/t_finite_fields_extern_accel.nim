@@ -192,22 +192,20 @@ when WordBitWidth == 64:
       check bool(invRootCheck.isOne())
 
   suite "External field accelerator (-d:CTT_EXTERN_FIELD_ACCEL)":
-    test "Field IDs 1, 2, 5, 6, 7 plain representation & ECALL counts":
+    test "Field IDs 1, 2, 5, 6, 7, 8 plain representation & ECALL counts":
       checkPlainFieldContract(Fp[Secp256k1], 1'u32, true)
       checkPlainFieldContract(Fr[Secp256k1], 2'u32, false)
       checkPlainFieldContract(Fp[BN254_Snarks], 5'u32, true)
       checkPlainFieldContract(Fr[BN254_Snarks], 6'u32, false)
       checkPlainFieldContract(Fr[BLS12_381], 7'u32, false)
+      checkPlainFieldContract(Fp[BLS12_381], 8'u32, true)
 
       # Unaccelerated fields remain Montgomery (ID 0)
       static:
-        doAssert Fp[BLS12_381].extFieldId() == 0'u32
-        doAssert not Fp[BLS12_381].hasExtFieldMul()
-        doAssert not Fp[BLS12_381].isPlainRepField()
         doAssert Fp[P256].extFieldId() == 0'u32
         doAssert Fr[P256].extFieldId() == 0'u32
 
-    test "4-limb canonical reduction (inputs >= p and >= 4p)":
+    test "4-limb and 6-limb canonical reduction (inputs >= p and >= 4p)":
       # Secp256k1 input in [p, 2p): 0 ECALLs
       var rawSecp: BigInt[256]
       rawSecp.limbs = [SecretWord(0xfffffffefffffc35'u64), SecretWord(0xffffffffffffffff'u64),
@@ -227,6 +225,16 @@ when WordBitWidth == 64:
       check bool(fBn == ctBn)
       check bool(fBn.mres < Fp[BN254_Snarks].getModulus())
 
+
+      # BLS12-381 Fp 6-limb input > 4p (384-bit value with top limb 0x7f.. > 4*0x1a01..): 1 MUL ECALL
+      let rawBlsFp = BigInt[381].fromHex("0x7fffffffffffffff99aabbccddeeff001122334455667788deadbeefcafebabe0123456789abcdeffedcba9876543210")
+      mock_zkvm_field_op_reset()
+      let fBlsFp = Fp[BLS12_381].fromBig(rawBlsFp)
+      check mock_zkvm_field_op_count(OpMul, 8'u32) == 1'u64
+      check mock_zkvm_field_op_total() == 1'u64
+      const ctBlsFp = Fp[BLS12_381].fromHex("0x7fffffffffffffff99aabbccddeeff001122334455667788deadbeefcafebabe0123456789abcdeffedcba9876543210")
+      check bool(fBlsFp == ctBlsFp)
+      check bool(fBlsFp.mres < Fp[BLS12_381].getModulus())
     test "Double-precision redc2x on Fp[Secp256k1] and Fp[BN254_Snarks]":
       for (xHex, yHex) in [
         ("0x2f112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
@@ -250,6 +258,15 @@ when WordBitWidth == 64:
         exp5.prod(a5, b5)
         check bool(r5 == exp5)
 
+
+        let a8 = Fp[BLS12_381].fromHex("0x15112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+        let b8 = Fp[BLS12_381].fromHex("0x12fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba98765432")
+        var d8: FpDbl[BLS12_381]
+        var r8, exp8: Fp[BLS12_381]
+        d8.prod2x(a8, b8)
+        r8.redc2x(d8)
+        exp8.prod(a8, b8)
+        check bool(r8 == exp8)
     test "BN254_Snarks extension tower (Fp2, Fp6, Fp12) and bilinearity of pairing":
       var g1 = BN254_Snarks.getGenerator("G1")
       var g2 = BN254_Snarks.getGenerator("G2")
@@ -302,3 +319,15 @@ when WordBitWidth == 64:
       check bool(outBn2[0].c0.mres < Fp[BN254_Snarks].getModulus())
       check bool(outBn2[0].c1.mres < Fp[BN254_Snarks].getModulus())
       check not bool(outBn2[0].isZero())
+
+      var outBls1: array[2, Fp[BLS12_381]]
+      sha256.hashToField(128, outBls1, [], "abc".toOpenArrayByte(0, 2), "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_".toOpenArrayByte(0, 38))
+      check bool(outBls1[0].mres < Fp[BLS12_381].getModulus())
+      check bool(outBls1[1].mres < Fp[BLS12_381].getModulus())
+      check not bool(outBls1[0].isZero())
+
+      var outBls2: array[2, Fp2[BLS12_381]]
+      sha256.hashToField(128, outBls2, [], "abc".toOpenArrayByte(0, 2), "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_".toOpenArrayByte(0, 38))
+      check bool(outBls2[0].c0.mres < Fp[BLS12_381].getModulus())
+      check bool(outBls2[0].c1.mres < Fp[BLS12_381].getModulus())
+      check not bool(outBls2[0].isZero())

@@ -17,26 +17,28 @@ import
 #
 # ############################################################
 
-# With -d:CTT_EXTERN_FIELD_ACCEL, some operations of some 256-bit fields are
-# delegated to a C function that Constantine only declares:
+# With -d:CTT_EXTERN_FIELD_ACCEL, operations on supported 256-bit (4-limb) and
+# 384-bit (6-limb) prime fields are delegated to C functions that Constantine
+# only declares:
 #
-#   uint32_t lineth_zkvm_field_op(uint32_t op, uint32_t field,
-#                                 uint64_t out[4], const uint64_t a[4], const uint64_t b[4]);
+#   uint32_t lineth_zkvm_field_op_256(uint32_t op, uint32_t field,
+#                                     uint64_t out[4], const uint64_t a[4], const uint64_t b[4]);
+#   uint32_t lineth_zkvm_field_op_384(uint32_t op, uint32_t field,
+#                                     uint64_t out[6], const uint64_t a[6], const uint64_t b[6]);
 #
-# The final link must provide it, e.g. a zkVM guest runtime that forwards it to
-# the prover (lineth_accelerators.h in the Lineth monorepo).
+# The final link must provide them, e.g. a zkVM guest runtime that forwards both
+# to the same ECALL (lineth_accelerators.h in the Lineth monorepo).
 #
 #   op    0 MUL   out = a*b
 #         1 DIV   out = a/b, 0 if b = 0                   (status 1 if b = 0)
 #         2 SQRT  out² = a, or out² = -a if a is not a square (status 1)
 #   field 1 Fp[Secp256k1]   2 Fr[Secp256k1]   5 Fp[BN254_Snarks]
-#         6 Fr[BN254_Snarks]   7 Fr[BLS12_381]
+#         6 Fr[BN254_Snarks]   7 Fr[BLS12_381]   8 Fp[BLS12_381]
 #
-# Operands are the 4 little-endian 64-bit limbs of the plain (not Montgomery)
-# value, below 2p. The output is reduced and may alias an input; b is read for
-# every op. The status is returned. SQRT needs p = 3 (mod 4) and may return
-# either root.
-#
+# Operands are the 4 (fields 1..7) or 6 (field 8) little-endian 64-bit limbs of
+# the plain (not Montgomery) value, below 2p. The output is reduced and may
+# alias an input; b is read for every op. The status is returned. SQRT needs
+# p = 3 (mod 4) and may return either root.
 # Constantine maps its operations onto these as follows:
 #   - Fields with hasExtFieldMul store plain values in [0, p): prod/square are
 #     MUL, inv is DIV(1, a), sqrt is SQRT.
@@ -45,7 +47,8 @@ import
 
 const CTT_EXTERN_FIELD_ACCEL {.booldefine.} = false
 
-func lineth_zkvm_field_op(op, field: uint32, r: pointer, a, b: pointer): uint32 {.importc, cdecl.}
+func lineth_zkvm_field_op_256(op, field: uint32, r: pointer, a, b: pointer): uint32 {.importc, cdecl.}
+func lineth_zkvm_field_op_384(op, field: uint32, r: pointer, a, b: pointer): uint32 {.importc, cdecl.}
 
 const
   ExtFieldMul = 0'u32
@@ -58,6 +61,7 @@ template extFieldId*(F: type FF): uint32 =
   elif F is Fp[BN254_Snarks]: 5'u32
   elif F is Fr[BN254_Snarks]: 6'u32
   elif F is Fr[BLS12_381]: 7'u32
+  elif F is Fp[BLS12_381]: 8'u32
   else: 0'u32
 
 template hasExtFieldInv*(F: type FF): static bool =
@@ -81,9 +85,12 @@ template isPlainRepField*(F: type FF): static bool =
 {.push raises: [], inline.}
 
 func extFieldOp[F: FF](op: uint32, r: var F, a, b: F): SecretBool =
-  static: doAssert sizeof(F) == 32, "the external field accelerator needs 4 limbs of 64 bits"
-  SecretBool(lineth_zkvm_field_op(op, F.extFieldId(), r.addr, a.unsafeAddr, b.unsafeAddr) != 0)
-
+  when sizeof(F) == 32:
+    SecretBool(lineth_zkvm_field_op_256(op, F.extFieldId(), r.addr, a.unsafeAddr, b.unsafeAddr) != 0)
+  elif sizeof(F) == 48:
+    SecretBool(lineth_zkvm_field_op_384(op, F.extFieldId(), r.addr, a.unsafeAddr, b.unsafeAddr) != 0)
+  else:
+    {.error: "the external field accelerator needs 4 or 6 limbs of 64 bits".}
 func extFieldProd*[F: FF](r: var F, a, b: F) =
   ## r <- a*b
   discard extFieldOp(ExtFieldMul, r, a, b)
@@ -101,29 +108,28 @@ func extFieldSqrt*[F: FF](r: var F, a: F): SecretBool =
   ## r <- √a if a is a square (returns true), else √-a (returns false)
   not extFieldOp(ExtFieldSqrt, r, a, a)
 
-func extFieldFromLimbs4*[F: FF](r: var F, limbs: array[4, SecretWord]) =
-  ## Reduce an arbitrary 4-limb (256-bit) unsigned integer modulo p into plain [0, p).
+func extFieldFromLimbs*[N: static int, F: FF](r: var F, limbs: array[N, SecretWord]) =
+  ## Reduce an arbitrary N-limb (256-bit or 384-bit) unsigned integer modulo p into plain [0, p).
   static:
     doAssert F.hasExtFieldMul()
-    doAssert r.mres.limbs.len == 4
+    doAssert r.mres.limbs.len == N and (N == 4 or N == 6)
   when F.getSpareBits() == 0:
-    # p > 2^255 (Secp256k1 Fp/Fr): any 256-bit integer is < 2p
+    # p > 2^(64*N - 1) (Secp256k1 Fp/Fr): any 64*N-bit integer is < 2p
     r.mres.limbs = limbs
     discard r.mres.csub(F.getModulus(), not(r.mres < F.getModulus()))
   else:
-    # 2^129 < p < 2^255 (BN254 Fp/Fr, BLS12-381 Fr):
-    # limbs = lo_128 + hi_128 * 2^128, with lo_128, hi_128, 2^128 all < p.
-    static: doAssert F.bits() > 129
-    var lo128, hi128, two128: F
-    lo128.mres.limbs[0] = limbs[0]
-    lo128.mres.limbs[1] = limbs[1]
-    hi128.mres.limbs[0] = limbs[2]
-    hi128.mres.limbs[1] = limbs[3]
-    two128.mres.limbs[2] = SecretWord(1)
+    # Split in half at 32*N bits (128 bits for N=4, 192 bits for N=6):
+    # limbs = loHalf + hiHalf * 2^(32*N), with loHalf, hiHalf, 2^(32*N) all < p.
+    const H = N div 2
+    static: doAssert F.bits() > 64 * H + 1
+    var loHalf, hiHalf, twoHalf: F
+    for i in 0 ..< H:
+      loHalf.mres.limbs[i] = limbs[i]
+      hiHalf.mres.limbs[i] = limbs[H + i]
+    twoHalf.mres.limbs[H] = SecretWord(1)
     var prodHi {.noInit.}: F
-    prodHi.extFieldProd(hi128, two128)
-    var overflowed = r.mres.sum(prodHi.mres, lo128.mres)
+    prodHi.extFieldProd(hiHalf, twoHalf)
+    var overflowed = r.mres.sum(prodHi.mres, loHalf.mres)
     overflowed = overflowed or not(r.mres < F.getModulus())
     discard r.mres.csub(F.getModulus(), overflowed)
-
 {.pop.}

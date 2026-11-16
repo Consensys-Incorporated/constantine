@@ -60,8 +60,8 @@ func fromBig*(dst: var FF, src: BigInt) =
     when nimvm:
       dst.mres.canonicalResidue_precompute(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord())
     else:
-      when src.limbs.len == 4:
-        dst.extFieldFromLimbs4(src.limbs)
+      when src.limbs.len == dst.mres.limbs.len and (src.limbs.len == 4 or src.limbs.len == 6):
+        dst.extFieldFromLimbs(src.limbs)
       else:
         var tmp {.noInit.}: typeof(dst.mres)
         tmp.getMont(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord(), FF.getSpareBits())

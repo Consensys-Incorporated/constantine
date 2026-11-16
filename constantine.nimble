@@ -339,9 +339,9 @@ task make_lib_riscv64_freestanding, "Build Constantine static library for rv64im
   ## freestanding stdio backing (stderr/fwrite/fflush/exit for the Nim runtime's OOM
   ## path) is compiled alongside and added to the archive.
   ##
-  ## CTT_EXTERN_FIELD_ACCEL=1 delegates some field operations to the extern
-  ## `lineth_zkvm_field_op`, which the final link must provide
-  ## (constantine/math/arithmetic/finite_fields_extern.nim).
+  ## CTT_EXTERN_FIELD_ACCEL=1 delegates supported field operations to the extern
+  ## `lineth_zkvm_field_op_256` and `lineth_zkvm_field_op_384`, which the final
+  ## link must provide (constantine/math/arithmetic/finite_fields_extern.nim).
   let wrapper = "constantine/platforms/clang-rv64-standalone.sh"
   let outdir = if existsEnv"CTT_OUTDIR": getEnv"CTT_OUTDIR" else: "lib"
   let nimcache = if existsEnv"CTT_NIMCACHE": getEnv"CTT_NIMCACHE" else: "nimcache/libconstantine_riscv64_freestanding"
