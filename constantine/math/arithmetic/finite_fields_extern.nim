@@ -42,11 +42,14 @@ import
 # Constantine maps its operations onto these as follows:
 #   - Fields with hasExtFieldMul store plain values in [0, p): prod/square are
 #     MUL, inv is DIV(1, a), sqrt is SQRT.
-#   - Montgomery fields store aR: inv is DIV(R², aR) = a⁻¹R, as invmod does.
-#     Products and square roots stay in software (they would need 2 calls).
+#   - Reserved for future Montgomery-only inversion (currently unused, as
+#     hasExtFieldInv and hasExtFieldMul currently share the same predicate):
+#     Montgomery fields store aR, so inv is DIV(R², aR) = a⁻¹R (as invmod does)
+#     while products and square roots stay in software (they would need 2 calls).
 
 const CTT_EXTERN_FIELD_ACCEL {.booldefine.} = false
 
+# Extern C entry points to the host/zkVM field accelerator (256-bit and 384-bit).
 func lineth_zkvm_field_op_256(op, field: uint32, r: pointer, a, b: pointer): uint32 {.importc, cdecl.}
 func lineth_zkvm_field_op_384(op, field: uint32, r: pointer, a, b: pointer): uint32 {.importc, cdecl.}
 
@@ -85,12 +88,14 @@ template isPlainRepField*(F: type FF): static bool =
 {.push raises: [], inline.}
 
 func extFieldOp[F: FF](op: uint32, r: var F, a, b: F): SecretBool =
+  ## Entry point dispatching field operations to the 256-bit or 384-bit extern accelerator.
   when sizeof(F) == 32:
     SecretBool(lineth_zkvm_field_op_256(op, F.extFieldId(), r.addr, a.unsafeAddr, b.unsafeAddr) != 0)
   elif sizeof(F) == 48:
     SecretBool(lineth_zkvm_field_op_384(op, F.extFieldId(), r.addr, a.unsafeAddr, b.unsafeAddr) != 0)
   else:
     {.error: "the external field accelerator needs 4 or 6 limbs of 64 bits".}
+
 func extFieldProd*[F: FF](r: var F, a, b: F) =
   ## r <- a*b
   discard extFieldOp(ExtFieldMul, r, a, b)
@@ -101,6 +106,7 @@ func extFieldInv*[F: FF](r: var F, a: F) =
   when F.hasExtFieldMul():
     num.mres.setOne()
   else:
+    # Reserved for future Montgomery-only inversion (currently unused)
     num.mres = F.getR2modP()
   discard extFieldOp(ExtFieldDiv, r, num, a)
 
@@ -132,4 +138,5 @@ func extFieldFromLimbs*[N: static int, F: FF](r: var F, limbs: array[N, SecretWo
     var overflowed = r.mres.sum(prodHi.mres, loHalf.mres)
     overflowed = overflowed or not(r.mres < F.getModulus())
     discard r.mres.csub(F.getModulus(), overflowed)
+
 {.pop.}

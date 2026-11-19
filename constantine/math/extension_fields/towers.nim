@@ -1368,6 +1368,12 @@ func square*(a: var QuadraticExt) =
 func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
   ## Multiplication r <- a*b
 
+  # Note: when `Fp[QuadraticExt.Name].hasExtFieldMul()` is enabled, complex Fp2
+  # multiplication still uses the double-width software `prod2x_complex` +
+  # `redc2x` path rather than single-width `prod_complex`. Routing accelerated
+  # Fp2 through single-width multiplication is tracked in:
+  # https://github.com/LFDT-Lineth/lineth-monorepo/issues/4496
+
   when r.fromComplexExtension():
     when UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem():
       when Fp[QuadraticExt.Name].hasExtFieldMul():

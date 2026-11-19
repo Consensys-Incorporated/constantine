@@ -17,11 +17,12 @@
 # Constraints:
 # - We assume that p and r are known at compile-time
 # - We assume that p and r are not even:
-#   - Operations are done in the Montgomery domain
-#   - The Montgomery domain introduce a Montgomery constant that must be coprime
-#     with the field modulus.
-#   - The constant is chosen a power of 2
-#   => to be coprime with a power of 2, p and r must be odd
+#   - By default, operations are done in the Montgomery domain, which introduces
+#     a Montgomery constant that must be coprime with the field modulus.
+#     The constant is chosen as a power of 2, so p and r must be odd.
+#   - Fields matching `isPlainRepField` (Crandall primes, and supported fields
+#     when `-d:CTT_EXTERN_FIELD_ACCEL` is enabled) instead store canonical plain
+#     residues in [0, p).
 # - We assume that p and r are a prime
 #   - Modular inversion may use the Fermat's little theorem
 #     which requires a prime
@@ -55,7 +56,10 @@ export Fp, Fr, FF, isPlainRepField
 # ############################################################
 
 func fromBig*(dst: var FF, src: BigInt) =
-  ## Convert a BigInt to its Montgomery form
+  ## Convert a BigInt to the field's internal representation
+  ## (Montgomery residue by default, or canonical plain residue in [0, p)
+  ## for `isPlainRepField` fields such as Crandall primes and
+  ## `CTT_EXTERN_FIELD_ACCEL`-accelerated fields).
   when FF.hasExtFieldMul():
     when nimvm:
       dst.mres.canonicalResidue_precompute(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord())
@@ -75,7 +79,10 @@ func fromBig*(dst: var FF, src: BigInt) =
       dst.mres.getMont(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord(), FF.getSpareBits())
 
 func fromBig*[Name: static Algebra](T: type FF[Name], src: BigInt): FF[Name] {.noInit.} =
-  ## Convert a BigInt to its Montgomery form
+  ## Convert a BigInt to the field's internal representation
+  ## (Montgomery residue by default, or canonical plain residue in [0, p)
+  ## for `isPlainRepField` fields such as Crandall primes and
+  ## `CTT_EXTERN_FIELD_ACCEL`-accelerated fields).
   result.fromBig(src)
 
 func fromField*(dst: var BigInt, src: FF) {.inline.} =
