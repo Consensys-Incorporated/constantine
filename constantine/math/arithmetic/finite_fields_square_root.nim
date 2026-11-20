@@ -11,6 +11,7 @@ import
   constantine/named/algebras,
   constantine/named/zoo_square_roots,
   ./finite_fields_square_root_precomp,
+  ./finite_fields_extern,
   ./bigints, ./finite_fields, ./limbs_exgcd
 
 # ############################################################
@@ -207,7 +208,11 @@ func invsqrt*[Name](r: var Fp[Name], a: Fp[Name]) =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  when Name.has_P_3mod4_primeModulus():
+  when Fp[Name].hasExtFieldSqrt():
+    var s {.noInit.}: Fp[Name]
+    discard s.extFieldSqrt(a)
+    r.inv(s)
+  elif Name.has_P_3mod4_primeModulus():
     r.invsqrt_p3mod4(a)
   elif Name.has_P_5mod8_primeModulus():
     r.invsqrt_p5mod8(a)
@@ -226,7 +231,11 @@ func invsqrt_vartime*[Name](r: var Fp[Name], a: Fp[Name]) =
   ## This procedure returns a deterministic result
   ##
   ## This procedure is NOT constant-time
-  when Name.has_P_3mod4_primeModulus():
+  when Fp[Name].hasExtFieldSqrt():
+    var s {.noInit.}: Fp[Name]
+    discard s.extFieldSqrt(a)
+    r.inv(s)
+  elif Name.has_P_3mod4_primeModulus():
     r.invsqrt_p3mod4(a)
   elif Name.has_P_5mod8_primeModulus():
     r.invsqrt_p5mod8(a)
@@ -246,9 +255,12 @@ func sqrt*[Name](a: var Fp[Name]) =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  var t {.noInit.}: Fp[Name]
-  t.invsqrt(a)
-  a *= t
+  when Fp[Name].hasExtFieldSqrt():
+    discard a.extFieldSqrt(a)
+  else:
+    var t {.noInit.}: Fp[Name]
+    t.invsqrt(a)
+    a *= t
 
 func sqrt_vartime*[Name](a: var Fp[Name]) =
   ## Compute the square root of ``a``
@@ -258,9 +270,12 @@ func sqrt_vartime*[Name](a: var Fp[Name]) =
   ## The result is undefined otherwise
   ##
   ## This is NOT constant-time
-  var t {.noInit.}: Fp[Name]
-  t.invsqrt_vartime(a)
-  a *= t
+  when Fp[Name].hasExtFieldSqrt():
+    discard a.extFieldSqrt(a)
+  else:
+    var t {.noInit.}: Fp[Name]
+    t.invsqrt_vartime(a)
+    a *= t
 
 func sqrt_invsqrt*[Name](sqrt, invsqrt: var Fp[Name], a: Fp[Name]) =
   ## Compute the square root and inverse square root of ``a``
@@ -322,9 +337,12 @@ func sqrt_if_square*[Name](a: var Fp[Name]): SecretBool =
   ## i.e. both x² == (-x)²
   ## This procedure returns a deterministic result
   ## This procedure is constant-time
-  var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
-  result = sqrt_invsqrt_if_square(sqrt, invsqrt, a)
-  a = sqrt
+  when Fp[Name].hasExtFieldSqrt():
+    result = a.extFieldSqrt(a)
+  else:
+    var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
+    result = sqrt_invsqrt_if_square(sqrt, invsqrt, a)
+    a = sqrt
 
 func sqrt_if_square_vartime*[Name](a: var Fp[Name]): SecretBool =
   ## If ``a`` is a square, compute the square root of ``a``
@@ -335,9 +353,12 @@ func sqrt_if_square_vartime*[Name](a: var Fp[Name]): SecretBool =
   ## This procedure returns a deterministic result
   ##
   ## This is NOT constant-time
-  var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
-  result = sqrt_invsqrt_if_square_vartime(sqrt, invsqrt, a)
-  a = sqrt
+  when Fp[Name].hasExtFieldSqrt():
+    result = a.extFieldSqrt(a)
+  else:
+    var sqrt{.noInit.}, invsqrt{.noInit.}: Fp[Name]
+    result = sqrt_invsqrt_if_square_vartime(sqrt, invsqrt, a)
+    a = sqrt
 
 func invsqrt_if_square*[Name](r: var Fp[Name], a: Fp[Name]): SecretBool =
   ## If ``a`` is a square, compute the inverse square root of ``a``

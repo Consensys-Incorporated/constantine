@@ -13,7 +13,7 @@ import
   ../hashes,
   ../math/io/[io_bigints, io_fields],
   constantine/named/algebras,
-  ../math/arithmetic/limbs_montgomery,
+  ../math/arithmetic/[finite_fields, finite_fields_extern, limbs_montgomery],
   ../math/extension_fields/towers
 
 # ############################################################
@@ -223,17 +223,43 @@ func hashToField*[Field; count: static int](
       var big2x {.noInit.}: Big2x
       big2x.unmarshal(tv, bigEndian)
 
-      # Reduces modulo p and output in Montgomery domain
+      # Reduces modulo p into the field's internal representation
       when m == 1:
-        output[i].redc2x(big2x)
-        output[i].mres.mulMont(
-          output[i].mres,
-          Fp[Field.Name].getR3modP(),
-          Fp[Field.Name])
+        when Fp[Field.Name].hasExtFieldMul():
+          const N = Fp[Field.Name].mres.limbs.len
+          var loLimbs, hiLimbs: array[N, SecretWord]
+          for k in 0 ..< N:
+            loLimbs[k] = big2x.limbs[k]
+            hiLimbs[k] = big2x.limbs[k + N]
+          var loF {.noInit.}, hiF {.noInit.}, Rmodp {.noInit.}, t {.noInit.}: Fp[Field.Name]
+          loF.extFieldFromLimbs(loLimbs)
+          hiF.extFieldFromLimbs(hiLimbs)
+          Rmodp.mres = Fp[Field.Name].getMontyOne()
+          t.prod(hiF, Rmodp)
+          output[i].sum(loF, t)
+        else:
+          output[i].redc2x(big2x)
+          output[i].mres.mulMont(
+            output[i].mres,
+            Fp[Field.Name].getR3modP(),
+            Fp[Field.Name])
 
       else:
-        output[i].coords[j].redc2x(big2x)
-        output[i].coords[j].mres.mulMont(
-          output[i].coords[j].mres,
-          Fp[Field.Name].getR3modP(),
-          Fp[Field.Name])
+        when Fp[Field.Name].hasExtFieldMul():
+          const N = Fp[Field.Name].mres.limbs.len
+          var loLimbs, hiLimbs: array[N, SecretWord]
+          for k in 0 ..< N:
+            loLimbs[k] = big2x.limbs[k]
+            hiLimbs[k] = big2x.limbs[k + N]
+          var loF {.noInit.}, hiF {.noInit.}, Rmodp {.noInit.}, t {.noInit.}: Fp[Field.Name]
+          loF.extFieldFromLimbs(loLimbs)
+          hiF.extFieldFromLimbs(hiLimbs)
+          Rmodp.mres = Fp[Field.Name].getMontyOne()
+          t.prod(hiF, Rmodp)
+          output[i].coords[j].sum(loF, t)
+        else:
+          output[i].coords[j].redc2x(big2x)
+          output[i].coords[j].mres.mulMont(
+            output[i].coords[j].mres,
+            Fp[Field.Name].getR3modP(),
+            Fp[Field.Name])

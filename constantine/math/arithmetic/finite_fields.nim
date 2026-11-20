@@ -17,11 +17,12 @@
 # Constraints:
 # - We assume that p and r are known at compile-time
 # - We assume that p and r are not even:
-#   - Operations are done in the Montgomery domain
-#   - The Montgomery domain introduce a Montgomery constant that must be coprime
-#     with the field modulus.
-#   - The constant is chosen a power of 2
-#   => to be coprime with a power of 2, p and r must be odd
+#   - By default, operations are done in the Montgomery domain, which introduces
+#     a Montgomery constant that must be coprime with the field modulus.
+#     The constant is chosen as a power of 2, so p and r must be odd.
+#   - Fields matching `isPlainRepField` (Crandall primes, and supported fields
+#     when `-d:CTT_EXTERN_FIELD_ACCEL` is enabled) instead store canonical plain
+#     residues in [0, p).
 # - We assume that p and r are a prime
 #   - Modular inversion may use the Fermat's little theorem
 #     which requires a prime
@@ -32,16 +33,17 @@ import
   constantine/named/properties_fields,
   ./bigints,
   ./bigints_montgomery,
-  ./bigints_crandall
+  ./bigints_crandall,
+  ./finite_fields_extern
 
 when UseASM_X86_64:
   import ./assembly/limbs_asm_modular_x86
 when UseASM_ARM64:
   import ./assembly/limbs_asm_modular_arm64
 
-from constantine/named/deriv/precompute import montyResidue_precompute
+from constantine/named/deriv/precompute import montyResidue_precompute, canonicalResidue_precompute
 
-export Fp, Fr, FF
+export Fp, Fr, FF, isPlainRepField
 
 # No exceptions allowed
 {.push raises: [].}
@@ -54,8 +56,21 @@ export Fp, Fr, FF
 # ############################################################
 
 func fromBig*(dst: var FF, src: BigInt) =
-  ## Convert a BigInt to its Montgomery form
-  when FF.isCrandallPrimeField():
+  ## Convert a BigInt to the field's internal representation
+  ## (Montgomery residue by default, or canonical plain residue in [0, p)
+  ## for `isPlainRepField` fields such as Crandall primes and
+  ## `CTT_EXTERN_FIELD_ACCEL`-accelerated fields).
+  when FF.hasExtFieldMul():
+    when nimvm:
+      dst.mres.canonicalResidue_precompute(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord())
+    else:
+      when src.limbs.len == dst.mres.limbs.len and (src.limbs.len == 4 or src.limbs.len == 6):
+        dst.extFieldFromLimbs(src.limbs)
+      else:
+        var tmp {.noInit.}: typeof(dst.mres)
+        tmp.getMont(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord(), FF.getSpareBits())
+        dst.mres.fromMont(tmp, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits())
+  elif FF.isCrandallPrimeField():
     dst.mres = src
   else:
     when nimvm:
@@ -64,12 +79,15 @@ func fromBig*(dst: var FF, src: BigInt) =
       dst.mres.getMont(src, FF.getModulus(), FF.getR2modP(), FF.getNegInvModWord(), FF.getSpareBits())
 
 func fromBig*[Name: static Algebra](T: type FF[Name], src: BigInt): FF[Name] {.noInit.} =
-  ## Convert a BigInt to its Montgomery form
+  ## Convert a BigInt to the field's internal representation
+  ## (Montgomery residue by default, or canonical plain residue in [0, p)
+  ## for `isPlainRepField` fields such as Crandall primes and
+  ## `CTT_EXTERN_FIELD_ACCEL`-accelerated fields).
   result.fromBig(src)
 
 func fromField*(dst: var BigInt, src: FF) {.inline.} =
   ## Convert a finite-field element to a BigInt in natural representation
-  when FF.isCrandallPrimeField():
+  when FF.isPlainRepField():
     dst = src.mres
   else:
     dst.fromMont(src.mres, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits())
@@ -128,14 +146,14 @@ func isZero*(a: FF): SecretBool =
 
 func isOne*(a: FF): SecretBool =
   ## Constant-time check if one
-  when FF.isCrandallPrimeField():
+  when FF.isPlainRepField():
     a.mres.isOne()
   else:
     a.mres == FF.getMontyOne()
 
 func isMinusOne*(a: FF): SecretBool =
   ## Constant-time check if -1 (mod p)
-  when FF.isCrandallPrimeField():
+  when FF.isPlainRepField():
     a.mres == FF.getPrimeMinus1()
   else:
     a.mres == FF.getMontyPrimeMinus1()
@@ -151,20 +169,14 @@ func setZero*(a: var FF) =
 
 func setOne*(a: var FF) =
   ## Set ``a`` to one
-  # Note: we need 1 in Montgomery residue form
-  # TODO: Nim codegen is not optimal it uses a temporary
-  #       Check if the compiler optimizes it away
-  when FF.isCrandallPrimeField():
+  when FF.isPlainRepField():
     a.mres.setOne()
   else:
     a.mres = FF.getMontyOne()
 
 func setMinusOne*(a: var FF) =
   ## Set ``a`` to -1 (mod p)
-  # Note: we need -1 in Montgomery residue form
-  # TODO: Nim codegen is not optimal it uses a temporary
-  #       Check if the compiler optimizes it away
-  when FF.isCrandallPrimeField():
+  when FF.isPlainRepField():
     a.mres = FF.getPrimeMinus1()
   else:
     a.mres = FF.getMontyPrimeMinus1()
@@ -268,14 +280,18 @@ func double*(r: var FF, a: FF) {.meter.} =
 func prod*(r: var FF, a, b: FF, lazyReduce: static bool = false) {.meter.} =
   ## Store the product of ``a`` by ``b`` modulo p into ``r``
   ## ``r`` is initialized / overwritten
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    r.extFieldProd(a, b)
+  elif FF.isCrandallPrimeField():
     r.mres.mulCran(a.mres, b.mres, FF.getModulus(), FF.getCrandallPrimeSubterm(), lazyReduce)
   else:
     r.mres.mulMont(a.mres, b.mres, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits(), lazyReduce)
 
 func square*(r: var FF, a: FF, lazyReduce: static bool = false) {.meter.} =
   ## Squaring modulo p
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    r.extFieldProd(a, a)
+  elif FF.isCrandallPrimeField():
     r.mres.squareCran(a.mres, FF.getModulus(), FF.getCrandallPrimeSubterm(), lazyReduce)
   else:
     r.mres.squareMont(a.mres, FF.getModulus(), FF.getNegInvModWord(), FF.getSpareBits(), lazyReduce)
@@ -283,7 +299,15 @@ func square*(r: var FF, a: FF, lazyReduce: static bool = false) {.meter.} =
 func sumprod*[N: static int](r: var FF, a, b: array[N, FF], lazyReduce: static bool = false) {.meter.} =
   ## Compute r <- ⅀aᵢ.bᵢ (mod M) (sum of products)
   # We rely on FF and Bigints having the same repr to avoid array copies
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    var acc {.noInit.}: FF
+    acc.prod(a[0], b[0])
+    for i in 1 ..< N:
+      var t {.noInit.}: FF
+      t.prod(a[i], b[i])
+      acc += t
+    r = acc
+  elif FF.isCrandallPrimeField():
     {.error: "Not implemented".}
   else:
     r.mres.sumprodMont(
@@ -303,7 +327,12 @@ func csetZero*(a: var FF, ctl: SecretBool) =
 
 func csetOne*(a: var FF, ctl: SecretBool) =
   ## Set ``a`` to 1 if ``ctl`` is true
-  a.mres.ccopy(FF.getMontyOne(), ctl)
+  when FF.isPlainRepField():
+    var one {.noInit.}: FF.getBigInt()
+    one.setOne()
+    a.mres.ccopy(one, ctl)
+  else:
+    a.mres.ccopy(FF.getMontyOne(), ctl)
 
 func cneg*(r: var FF, a: FF, ctl: SecretBool) {.meter.} =
   ## Constant-time out-of-place conditional negation
@@ -369,7 +398,9 @@ func inv*(r: var FF, a: FF) {.meter.} =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldInv():
+    r.extFieldInv(a)
+  elif FF.isCrandallPrimeField():
     r.mres.invmod(a.mres, FF.getModulus())
   else:
     r.mres.invmod(a.mres, FF.getR2modP(), FF.getModulus())
@@ -390,7 +421,9 @@ func inv_vartime*(r: var FF, a: FF) {.meter, tags: [VarTime].} =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldInv():
+    r.extFieldInv(a)
+  elif FF.isCrandallPrimeField():
     r.mres.invmod_vartime(a.mres, FF.getModulus())
   else:
     r.mres.invmod_vartime(a.mres, FF.getR2modP(), FF.getModulus())
@@ -560,11 +593,61 @@ template mulCheckSparse*(a: var Fp, b: Fp) =
 #
 # Internally those procedures will allocate extra scratchspace on the stack
 
+# Generic exponentiation on plain-representation fields
+# -------------------------------------------------------------------
+# Both routines share the byte-to-bit iteration; `vartime` selects the
+# variable-time (skip leading zero bytes / early-exit) variant.
+
+func powPlain(a: var FF, exponent: openarray[byte], vartime: static bool) =
+  ## Exponentiation on plain-representation fields via square-and-multiply.
+  let base = a
+  when vartime:
+    var firstNonZero = 0
+    while firstNonZero < exponent.len and exponent[firstNonZero] == 0:
+      inc firstNonZero
+    if firstNonZero == exponent.len:
+      a.setOne()
+      return
+    let firstByte = exponent[firstNonZero]
+    var topBit = 7
+    while topBit > 0 and ((firstByte shr topBit) and 1) == 0:
+      dec topBit
+    var acc = base
+    for i in countdown(topBit - 1, 0):
+      acc.square(acc)
+      if ((firstByte shr i) and 1) != 0:
+        acc.prod(acc, base)
+    for idx in firstNonZero + 1 ..< exponent.len:
+      let e = exponent[idx]
+      for i in countdown(7, 0):
+        acc.square(acc)
+        if ((e shr i) and 1) != 0:
+          acc.prod(acc, base)
+    a = acc
+  else:
+    var acc {.noInit.}: FF
+    acc.setOne()
+    for e in exponent:
+      for i in countdown(7, 0):
+        acc.square(acc)
+        var t {.noInit.}: FF
+        t.prod(acc, base)
+        let bit = SecretBool((e shr i) and 1)
+        acc.ccopy(t, bit)
+    a = acc
+
+func powPlain(a: var FF, exponent: BigInt, vartime: static bool) =
+  var be {.noInit.}: array[exponent.bits.ceilDiv_vartime(8), byte]
+  be.marshal(exponent, bigEndian)
+  powPlain(a, be, vartime)
+
 func pow*(a: var FF, exponent: BigInt) =
   ## Exponentiation modulo p
   ## ``a``: a field element to be exponentiated
   ## ``exponent``: a big integer
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    powPlain(a, exponent, vartime = false)
+  elif FF.isCrandallPrimeField():
     const windowSize = 5 # TODO: find best window size for each curves
     a.mres.powCran(
       exponent,
@@ -585,7 +668,9 @@ func pow*(a: var FF, exponent: openarray[byte]) =
   ## Exponentiation modulo p
   ## ``a``: a field element to be exponentiated
   ## ``exponent``: a big integer in canonical big endian representation
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    powPlain(a, exponent, vartime = false)
+  elif FF.isCrandallPrimeField():
     const windowSize = 5 # TODO: find best window size for each curves
     a.mres.powCran(
       exponent,
@@ -630,7 +715,9 @@ func pow_vartime*(a: var FF, exponent: BigInt) =
   ## - power analysis
   ## - timing analysis
 
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    powPlain(a, exponent, vartime = true)
+  elif FF.isCrandallPrimeField():
     const windowSize = 5 # TODO: find best window size for each curves
     a.mres.powCran_vartime(
       exponent,
@@ -659,7 +746,9 @@ func pow_vartime*(a: var FF, exponent: openarray[byte]) =
   ## - power analysis
   ## - timing analysis
 
-  when FF.isCrandallPrimeField():
+  when FF.hasExtFieldMul():
+    powPlain(a, exponent, vartime = true)
+  elif FF.isCrandallPrimeField():
     const windowSize = 5 # TODO: find best window size for each curves
     a.mres.powCran_vartime(
       exponent,
@@ -1026,10 +1115,16 @@ func getZero*(T: type FF): T {.inline.} =
   discard
 
 func getOne*(T: type FF): T {.noInit, inline.} =
-  cast[ptr T](T.getMontyOne().unsafeAddr)[]
+  when T.isPlainRepField():
+    result.mres.setOne()
+  else:
+    result = cast[ptr T](T.getMontyOne().unsafeAddr)[]
 
 func getMinusOne*(T: type FF): T {.noInit, inline.} =
-  cast[ptr T](T.getMontyPrimeMinus1().unsafeAddr)[]
+  when T.isPlainRepField():
+    result.mres = T.getPrimeMinus1()
+  else:
+    result = cast[ptr T](T.getMontyPrimeMinus1().unsafeAddr)[]
 
 func `+`*(a, b: FF): FF {.noInit, inline.} =
   ## Finite Field addition

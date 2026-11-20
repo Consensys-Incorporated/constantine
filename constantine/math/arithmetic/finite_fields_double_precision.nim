@@ -11,6 +11,7 @@ import
   constantine/named/algebras,
   ./bigints,
   ./finite_fields,
+  ./finite_fields_extern,
   ./limbs,
   ./limbs_extmul,
   ./limbs_montgomery
@@ -75,13 +76,33 @@ func square2x*(r: var FpDbl, a: Fp) {.meter.} =
 func redc2x*(r: var Fp, a: FpDbl) {.meter.} =
   ## Reduce a double-precision field element into r
   ## from [0, 2ⁿp) range to [0, p) range
-  redc2xMont(
-    r.mres.limbs,
-    a.limbs2x,
-    Fp.getModulus().limbs,
-    Fp.getNegInvModWord(),
-    Fp.getSpareBits()
-  )
+  when Fp.hasExtFieldMul():
+    # Plain representation: a = lo + hi * R with R = 2^(WordBitWidth*N).
+    # lo < 2^n, hi < p. R mod p == Fp.getMontyOne().
+    # So a mod p = lo mod p + hi * (R mod p).
+    # lo mod p: fromBig handles canonical reduction; prod is one ECALL.
+    const N = a.limbs2x.len div 2
+    var lo {.noInit.}: Fp.getBigInt()
+    var hi_f {.noInit.}: Fp
+    for i in 0 ..< N:
+      lo.limbs[i] = a.limbs2x[i]
+      hi_f.mres.limbs[i] = a.limbs2x[i + N]
+    # Since a < 2^n * p, hi is already < p.
+    var lo_f {.noInit.}: Fp
+    lo_f.fromBig(lo)
+    var Rmodp {.noInit.}: Fp
+    Rmodp.mres = Fp.getMontyOne()  # R mod p in plain representation
+    var t {.noInit.}: Fp
+    t.prod(hi_f, Rmodp)
+    r.sum(lo_f, t)
+  else:
+    redc2xMont(
+      r.mres.limbs,
+      a.limbs2x,
+      Fp.getModulus().limbs,
+      Fp.getNegInvModWord(),
+      Fp.getSpareBits()
+    )
 
 func diff2xUnr*(r: var FpDbl, a, b: FpDbl) {.meter.} =
   ## Double-precision substraction without reduction

@@ -13,6 +13,7 @@ import
   ./math/io/[io_bigints, io_fields],
   ./math/[ec_shortweierstrass, arithmetic, extension_fields],
   ./math/arithmetic/limbs_montgomery,
+  ./math/arithmetic/finite_fields_extern,
   ./math/polynomials/polynomials,
   ./math/arithmetic/bigints,
   ./commitments/kzg,
@@ -116,14 +117,15 @@ func fromDigest(dst: var Fr[BLS12_381], src: array[32, byte]) =
   var scalar {.noInit.}: BigInt[256]
   scalar.unmarshal(src, bigEndian)
 
-  # Due to mismatch between the BigInt[256] input
-  # and Fr[BLS12_381] being built on top of BigInt[255]
-  # we use the low-level getMont instead of 'fromBig'
-  getMont(dst.mres.limbs, scalar.limbs,
-          Fr[BLS12_381].getModulus().limbs,
-          Fr[BLS12_381].getR2modP().limbs,
-          Fr[BLS12_381].getNegInvModWord(),
-          Fr[BLS12_381].getSpareBits())
+  # Reduce scalar modulo r canonically (handles BigInt[256] -> BigInt[255]).
+  when Fr[BLS12_381].hasExtFieldMul():
+    dst.extFieldFromLimbs(scalar.limbs)
+  else:
+    getMont(dst.mres.limbs, scalar.limbs,
+            Fr[BLS12_381].getModulus().limbs,
+            Fr[BLS12_381].getR2modP().limbs,
+            Fr[BLS12_381].getNegInvModWord(),
+            Fr[BLS12_381].getSpareBits())
 
 func fromDigest(dst: var Fr[BLS12_381].getBigInt(), src: array[32, byte]) =
   ## Convert a SHA256 digest to an element in the scalar field Fr[BLS12-381]
