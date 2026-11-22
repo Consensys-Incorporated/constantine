@@ -22,8 +22,12 @@ import
   constantine/math/elliptic/[
     ec_shortweierstrass_affine,
     ec_shortweierstrass_affine_vartime,
-    ec_shortweierstrass_jacobian],
+    ec_shortweierstrass_jacobian,
+    ec_shortweierstrass_projective,
+    ec_scalar_mul,
+    ec_scalar_mul_vartime],
   constantine/math/io/[io_fields, io_extfields, io_ec],
+  constantine/named/zoo_subgroups,
   helpers/prng_unsafe
 
 const CTT_EXTERN_FIELD_ACCEL {.booldefine.} = false
@@ -161,6 +165,38 @@ proc testAffineVartime(EC: typedesc) =
       d.div_vartime(a, b)
       doAssert mock_zkvm_field_op_total() == 8, $mock_zkvm_field_op_total()
 
+proc testScalarMulVartime(EC: typedesc) =
+  ## scalarMul_vartime (affine accumulator when useAffineVartime)
+  ## against the constant-time generic scalar multiplication,
+  ## for the endomorphism, wNAF window 4 and window 3 paths.
+  type F = EC.F
+  const Name = F.Name
+  echo "    ", $EC
+  for i in 0 ..< Iters div 4:
+    var P {.noInit.}: EC
+    P.fromAffine(rng.random_unsafe(EC_ShortW_Aff[F, EC.G]))
+    P.clearCofactor()
+    let k = rng.random_unsafe(Fr[Name]).toBig()
+    for bitsKept in [k.bits, 200, 100, 64, 40, 12, 8, 1, 0]:
+      var s = k
+      # Keep only the low `bitsKept` bits
+      for w in 0 ..< s.limbs.len:
+        let lo = w * WordBitWidth
+        if lo >= bitsKept:
+          s.limbs[w] = Zero
+        elif bitsKept - lo < WordBitWidth:
+          s.limbs[w] = s.limbs[w] and ((One shl (bitsKept - lo)) - One)
+      var r = P
+      var e = P
+      r.scalarMul_vartime(s)
+      e.scalarMulGeneric(s)
+      doAssert bool(r == e), "scalarMul_vartime mismatch for " & $EC & " with " & $bitsKept & " bits"
+    # Neutral input
+    var O {.noInit.}: EC
+    O.setNeutral()
+    O.scalarMul_vartime(k)
+    doAssert bool(O.isNeutral())
+
 suite "Variable-time affine arithmetic for a = 0 curves" & " [" & $WordBitWidth & "-bit words]":
   test "Sum, difference, doubling and exceptional cases vs Jacobian":
     testAffineVartime(EC_ShortW_Aff[Fp[Secp256k1], G1])
@@ -168,3 +204,13 @@ suite "Variable-time affine arithmetic for a = 0 curves" & " [" & $WordBitWidth 
     testAffineVartime(EC_ShortW_Aff[Fp2[BN254_Snarks], G2])
     testAffineVartime(EC_ShortW_Aff[Fp[BLS12_381], G1])
     testAffineVartime(EC_ShortW_Aff[Fp2[BLS12_381], G2])
+
+  test "scalarMul_vartime (affine accumulator when accelerated) vs constant-time":
+    testScalarMulVartime(EC_ShortW_Jac[Fp[Secp256k1], G1])
+    testScalarMulVartime(EC_ShortW_Jac[Fp[BN254_Snarks], G1])
+    testScalarMulVartime(EC_ShortW_Prj[Fp[BN254_Snarks], G1])
+    testScalarMulVartime(EC_ShortW_Jac[Fp2[BN254_Snarks], G2])
+    testScalarMulVartime(EC_ShortW_Jac[Fp[BLS12_381], G1])
+    testScalarMulVartime(EC_ShortW_Prj[Fp[BLS12_381], G1])
+    testScalarMulVartime(EC_ShortW_Jac[Fp2[BLS12_381], G2])
+    testScalarMulVartime(EC_ShortW_Prj[Fp2[BLS12_381], G2])
