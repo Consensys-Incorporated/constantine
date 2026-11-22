@@ -1060,6 +1060,20 @@ func prod_disjoint_schoolbook*[F](r: var QuadraticExt[F], a: QuadraticExt[F], b0
   t1 *= NonResidue
   r.c0.sum(t0, t1)
 
+func square_schoolbook[F](r: var QuadraticExt[F], a: QuadraticExt[F]) =
+  ## Returns r = a² with schoolbook squaring:
+  ##   r0 = a0² + β a1²
+  ##   r1 = 2 a0 a1
+  ## Used when products are accelerated, see `skipLazyReduction`.
+  ## `r` may alias `a`.
+  var t0 {.noInit.}, t1 {.noInit.}: F
+  t0.square(a.c0)
+  t1.square(a.c1)
+  r.c1.prod(a.c0, a.c1)   # last read of a
+  r.c1.double()
+  t1 *= NonResidue
+  r.c0.sum(t0, t1)
+
 func prod_generic(r: var QuadraticExt, a, b: QuadraticExt) =
   ## Returns r = a * b
   # Algorithm (with β the non-residue in the base field)
@@ -1402,8 +1416,9 @@ func square*(r: var QuadraticExt, a: QuadraticExt) =
       # BW6-761 requires too many registers for Dbl width path
       r.square_generic(a)
     elif QuadraticExt.Name.skipLazyReduction():
-      # Single-width products, see `skipLazyReduction`
-      r.square_generic(a)
+      # Single-width products, see `skipLazyReduction`.
+      # Schoolbook: fewest additions, which cost more than accelerated products.
+      r.square_schoolbook(a)
     elif QuadraticExt is Fp4[BLS12_377]:
       # TODO BLS12-377 slowness to fix
       r.square_generic(a)
