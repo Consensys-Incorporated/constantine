@@ -1044,6 +1044,22 @@ func prodImpl_fp4o2_complex_snr_1pi[Name: static Algebra](r: var Fp4[Name], a, b
 # Multiplications (generic)
 # ----------------------------------------------------------------------
 
+func prod_disjoint_schoolbook*[F](r: var QuadraticExt[F], a: QuadraticExt[F], b0, b1: F) =
+  ## Returns r = a * (b0 + b1 𝑢) with schoolbook multiplication:
+  ##   r0 = a0 b0 + β a1 b1
+  ##   r1 = a0 b1 + a1 b0
+  ## 4 products instead of Karatsuba's 3 but 4 fewer additions/substractions.
+  ## Used when products are accelerated, see `skipLazyReduction`.
+  ## `r` may alias `a`, and `b0`/`b1` may alias coordinates of `r`.
+  var t0 {.noInit.}, t1 {.noInit.}, t2 {.noInit.}: F
+  t0.prod(a.c0, b0)
+  t1.prod(a.c1, b1)
+  t2.prod(a.c0, b1)
+  r.c1.prod(a.c1, b0)     # last read of a and b
+  r.c1 += t2
+  t1 *= NonResidue
+  r.c0.sum(t0, t1)
+
 func prod_generic(r: var QuadraticExt, a, b: QuadraticExt) =
   ## Returns r = a * b
   # Algorithm (with β the non-residue in the base field)
@@ -1424,9 +1440,10 @@ func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
       # BW6-761 requires too many registers for Dbl width path
       r.prod_generic(a, b)
     elif QuadraticExt.Name.skipLazyReduction():
-      # Karatsuba over single-width products, see `skipLazyReduction`.
-      # (prodImpl_fp4o2_complex_snr_1pi needs 16 Fp products instead of 12)
-      r.prod_generic(a, b)
+      # Single-width products, see `skipLazyReduction`.
+      # Schoolbook (16 Fp products, fewest additions) over Fp2:
+      # additions cost more than accelerated products.
+      r.prod_disjoint_schoolbook(a, b.c0, b.c1)
     elif QuadraticExt is Fp4 and QuadraticExt.Name.getNonResidueFp() == -1 and QuadraticExt.Name.getNonResidueFp2() == (1, 1):
       r.prodImpl_fp4o2_complex_snr_1pi(a, b)
     else:
