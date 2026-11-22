@@ -1297,6 +1297,7 @@ func mul_sparse_by_abcd00efghij_cube_over_quad*[Fpk](
     # r₂ (reads a₀, a₂), then r₁ (reads a₀, a₁), then r₀ from the saved a₁ + a₂.
     var v0 {.noInit.}, v1 {.noInit.}, v2 {.noInit.}: Fpkdiv3
     var s12 {.noInit.}, t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
+    var u {.noInit.}: typeof(a.c0.c0)
 
     v0.prod(a.c0, b.c0)
     v1.mul_sparse_by_0y(a.c1, b.c1)
@@ -1313,22 +1314,22 @@ func mul_sparse_by_abcd00efghij_cube_over_quad*[Fpk](
 
     # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + ξ v₂
     t0.sum(a.c0, a.c1)
-    t1.c0 = b.c0.c0
-    t1.c1.sum(b.c0.c1, b.c1.c1)             # b₁ = (  0, b11)
-    a.c1.prod(t0, t1)
+    u.sum(b.c0.c1, b.c1.c1)                 # b₁ = (  0, b11)
+    a.c1.prod_disjoint_schoolbook(t0, b.c0.c0, u)
     a.c1 -= v0
     a.c1 -= v1
-    t0.prod(v2, NonResidue)
-    a.c1 += t0
+    u.prod(v2.c1, NonResidue)               # ξ v₂ = (β v₂₁, v₂₀), without the copies of
+    a.c1.c0 += u                            # the 𝔽pᵏᐟ³ non-residue multiplication
+    a.c1.c1 += v2.c0
 
     # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
-    t1.c0 = b.c2.c0
-    t1.c1.sum(b.c1.c1, b.c2.c1)             # b₁ = (  0, b11)
-    a.c0.prod(s12, t1)
-    a.c0 -= v1
-    a.c0 -= v2
-    a.c0 *= NonResidue
-    a.c0 += v0
+    u.sum(b.c1.c1, b.c2.c1)                 # b₁ = (  0, b11)
+    t0.prod_disjoint_schoolbook(s12, b.c2.c0, u)
+    t0 -= v1
+    t0 -= v2
+    a.c0.c0.prod(t0.c1, NonResidue)         # ξ t₀ = (β t₀₁, t₀₀)
+    a.c0.c0 += v0.c0
+    a.c0.c1.sum(t0.c0, v0.c1)
   else: # Lazy reduction
     var V0 {.noInit.}, V1 {.noInit.}, V2 {.noinit.}: doublePrec(Fpkdiv3)
     var t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
