@@ -110,6 +110,13 @@ func extFieldInv*[F: FF](r: var F, a: F) =
     num.mres = F.getR2modP()
   discard extFieldOp(ExtFieldDiv, r, num, a)
 
+func extFieldDiv*[F: FF](r: var F, a, b: F) =
+  ## r <- a/b, 0 if b = 0, in a single DIV call.
+  ## Requires the plain representation (hasExtFieldMul): on Montgomery
+  ## residues DIV(aR, bR) would return a/b instead of (a/b)R.
+  static: doAssert F.hasExtFieldMul()
+  discard extFieldOp(ExtFieldDiv, r, a, b)
+
 func extFieldSqrt*[F: FF](r: var F, a: F): SecretBool =
   ## r <- √a if a is a square (returns true), else √-a (returns false)
   not extFieldOp(ExtFieldSqrt, r, a, a)
