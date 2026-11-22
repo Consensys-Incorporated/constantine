@@ -411,7 +411,7 @@ func mul_sparse_by_line_a00bc0*[Fpk, Fpkdiv6](f: var Fpk, l: Line[Fpkdiv6]) =
 
   type Fpkdiv2 = typeof(f.c0)
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var
       v0 {.noInit.}: Fpkdiv2
       v1 {.noInit.}: Fpkdiv2
@@ -566,7 +566,7 @@ func mul_sparse_by_line_cb00a0*[Fpk, Fpkdiv6](f: var Fpk, l: Line[Fpkdiv6]) =
 
   type Fpkdiv2 = typeof(f.c0)
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var
       v0 {.noInit.}: Fpkdiv2
       v1 {.noInit.}: Fpkdiv2
@@ -738,7 +738,7 @@ func mul_sparse_by_line_acb000*[Fpk, Fpkdiv6](f: var Fpk, l: Line[Fpkdiv6]) =
   #    = a0 b0 + a2 b0 - v0 + v1
   #    = a2 b0 + v1
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var b0 {.noInit.}, v0{.noInit.}, v1{.noInit.}, t{.noInit.}: Fpkdiv3
 
     b0.c0 = l.a
@@ -829,48 +829,81 @@ func prod_xzy000_xzy000_into_abcdefghij00*[Fpk, Fpkdiv6](f: var Fpk, l0, l1: Lin
     doAssert f is CubicExt, "This assumes 𝔽pᵏ as a cubic extension of 𝔽pᵏᐟ³"
     doAssert f.c0 is QuadraticExt, "This assumes 𝔽pᵏᐟ³ as a quadratic extension of 𝔽pᵏᐟ⁶"
 
-  var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: doublePrec(Fpkdiv6)
+  when Fpk.Name.skipLazyReduction():
+    # Same formulas with single-width products, see `skipLazyReduction`
+    var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: Fpkdiv6
+    var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
 
-  XX.prod2x(l0.a, l1.a)
-  YY.prod2x(l0.b, l1.b)
-  ZZ.prod2x(l0.c, l1.c)
+    XX.prod(l0.a, l1.a)
+    YY.prod(l0.b, l1.b)
+    ZZ.prod(l0.c, l1.c)
 
-  var V{.noInit.}: doublePrec(Fpkdiv6)
-  var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
+    f.c0.c0.prod(ZZ, NonResidue)
+    f.c0.c0 += XX
 
-  # r0 = a0 b0 = (x, z).(x', z')
-  # r00 = xx' + βzz'
-  # r01 = (x+z)(x'+z') - zz' - xx'
-  V.prod2x(ZZ, NonResidue)
-  V.sum2xMod(V, XX)
-  f.c0.c0.redc2x(V)
+    t0.sum(l0.a, l0.c)
+    t1.sum(l1.a, l1.c)
+    f.c0.c1.prod(t0, t1)
+    f.c0.c1 -= ZZ
+    f.c0.c1 -= XX
 
-  t0.sum(l0.a, l0.c)
-  t1.sum(l1.a, l1.c)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, ZZ)
-  V.diff2xMod(V, XX)
-  f.c0.c1.redc2x(V)
+    t0.sum(l0.a, l0.b)
+    t1.sum(l1.a, l1.b)
+    f.c1.c0.prod(t0, t1)
+    f.c1.c0 -= XX
+    f.c1.c0 -= YY
 
-  # r10 = zy'+yz' = (x+y)(x'+y') - xx' - yy'
-  # r11 = xy'+yx' = (z+y)(z'+y') - zz' - yy'
-  t0.sum(l0.a, l0.b)
-  t1.sum(l1.a, l1.b)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, XX)
-  V.diff2xMod(V, YY)
-  f.c1.c0.redc2x(V)
+    t0.sum(l0.c, l0.b)
+    t1.sum(l1.c, l1.b)
+    f.c1.c1.prod(t0, t1)
+    f.c1.c1 -= ZZ
+    f.c1.c1 -= YY
 
-  t0.sum(l0.c, l0.b)
-  t1.sum(l1.c, l1.b)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, ZZ)
-  V.diff2xMod(V, YY)
-  f.c1.c1.redc2x(V)
+    f.c2.c0 = YY
+    f.c2.c1.setZero()
+  else: # Lazy reduction
+    var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: doublePrec(Fpkdiv6)
 
-  # r2 = v2 = (y, 0).(y', 0) = (yy', 0)
-  f.c2.c0.redc2x(YY)
-  f.c2.c1.setZero()
+    XX.prod2x(l0.a, l1.a)
+    YY.prod2x(l0.b, l1.b)
+    ZZ.prod2x(l0.c, l1.c)
+
+    var V{.noInit.}: doublePrec(Fpkdiv6)
+    var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
+
+    # r0 = a0 b0 = (x, z).(x', z')
+    # r00 = xx' + βzz'
+    # r01 = (x+z)(x'+z') - zz' - xx'
+    V.prod2x(ZZ, NonResidue)
+    V.sum2xMod(V, XX)
+    f.c0.c0.redc2x(V)
+
+    t0.sum(l0.a, l0.c)
+    t1.sum(l1.a, l1.c)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, ZZ)
+    V.diff2xMod(V, XX)
+    f.c0.c1.redc2x(V)
+
+    # r10 = zy'+yz' = (x+y)(x'+y') - xx' - yy'
+    # r11 = xy'+yx' = (z+y)(z'+y') - zz' - yy'
+    t0.sum(l0.a, l0.b)
+    t1.sum(l1.a, l1.b)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, XX)
+    V.diff2xMod(V, YY)
+    f.c1.c0.redc2x(V)
+
+    t0.sum(l0.c, l0.b)
+    t1.sum(l1.c, l1.b)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, ZZ)
+    V.diff2xMod(V, YY)
+    f.c1.c1.redc2x(V)
+
+    # r2 = v2 = (y, 0).(y', 0) = (yy', 0)
+    f.c2.c0.redc2x(YY)
+    f.c2.c1.setZero()
 
 # M-Twist
 # ------------------------------------------------------------
@@ -908,7 +941,7 @@ func mul_sparse_by_line_ca00b0*[Fpk, Fpkdiv6](f: var Fpk, l: Line[Fpkdiv6]) =
   # r2 = (a0 + a2) * (b0 + b2) - v0 - v2 + v1
   #    = (a0 + a2) * (b0 + b2) - v0 - v2
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var b0 {.noInit.}, v0{.noInit.}, v2{.noInit.}, t{.noInit.}: Fpkdiv3
 
     b0.c0 = l.c
@@ -1001,48 +1034,81 @@ func prod_zx00y0_zx00y0_into_abcd00efghij*[Fpk, Fpkdiv6](f: var Fpk, l0, l1: Lin
     doAssert f is CubicExt, "This assumes 𝔽pᵏ as a cubic extension of 𝔽pᵏᐟ³"
     doAssert f.c0 is QuadraticExt, "This assumes 𝔽pᵏᐟ³ as a quadratic extension of 𝔽pᵏᐟ⁶"
 
-  var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: doublePrec(Fpkdiv6)
+  when Fpk.Name.skipLazyReduction():
+    # Same formulas with single-width products, see `skipLazyReduction`
+    var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: Fpkdiv6
+    var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
 
-  XX.prod2x(l0.a, l1.a)
-  YY.prod2x(l0.b, l1.b)
-  ZZ.prod2x(l0.c, l1.c)
+    XX.prod(l0.a, l1.a)
+    YY.prod(l0.b, l1.b)
+    ZZ.prod(l0.c, l1.c)
 
-  var V{.noInit.}: doublePrec(Fpkdiv6)
-  var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
+    f.c0.c0.prod(XX, NonResidue)
+    f.c0.c0 += ZZ
 
-  # r0 = a0 b0 = (z, x).(z', x')
-  # r00 = zz' + βxx'
-  # r01 = (z+x)(z'+x') - zz' - xx'
-  V.prod2x(XX, NonResidue)
-  V.sum2xMod(V, ZZ)
-  f.c0.c0.redc2x(V)
+    t0.sum(l0.c, l0.a)
+    t1.sum(l1.c, l1.a)
+    f.c0.c1.prod(t0, t1)
+    f.c0.c1 -= ZZ
+    f.c0.c1 -= XX
 
-  t0.sum(l0.c, l0.a)
-  t1.sum(l1.c, l1.a)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, ZZ)
-  V.diff2xMod(V, XX)
-  f.c0.c1.redc2x(V)
+    f.c1.c0.setZero()
+    f.c1.c1 = YY
 
-  # r1 = ξ v2 = ξ(y, 0).(y', 0) = ξ(yy', 0) = (0, yy')
-  f.c1.c0.setZero()
-  f.c1.c1.redc2x(YY)
+    t0.sum(l0.c, l0.b)
+    t1.sum(l1.c, l1.b)
+    f.c2.c0.prod(t0, t1)
+    f.c2.c0 -= ZZ
+    f.c2.c0 -= YY
 
-  # r20 = zy'+z'y = (z+y)(z'+y') - zz' - yy'
-  # r21 = xy'+x'y = (x+y)(x'+y') - xx' - yy'
-  t0.sum(l0.c, l0.b)
-  t1.sum(l1.c, l1.b)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, ZZ)
-  V.diff2xMod(V, YY)
-  f.c2.c0.redc2x(V)
+    t0.sum(l0.a, l0.b)
+    t1.sum(l1.a, l1.b)
+    f.c2.c1.prod(t0, t1)
+    f.c2.c1 -= XX
+    f.c2.c1 -= YY
+  else: # Lazy reduction
+    var XX{.noInit.}, YY{.noInit.}, ZZ{.noInit.}: doublePrec(Fpkdiv6)
 
-  t0.sum(l0.a, l0.b)
-  t1.sum(l1.a, l1.b)
-  V.prod2x(t0, t1)
-  V.diff2xMod(V, XX)
-  V.diff2xMod(V, YY)
-  f.c2.c1.redc2x(V)
+    XX.prod2x(l0.a, l1.a)
+    YY.prod2x(l0.b, l1.b)
+    ZZ.prod2x(l0.c, l1.c)
+
+    var V{.noInit.}: doublePrec(Fpkdiv6)
+    var t0{.noInit.}, t1{.noInit.}: Fpkdiv6
+
+    # r0 = a0 b0 = (z, x).(z', x')
+    # r00 = zz' + βxx'
+    # r01 = (z+x)(z'+x') - zz' - xx'
+    V.prod2x(XX, NonResidue)
+    V.sum2xMod(V, ZZ)
+    f.c0.c0.redc2x(V)
+
+    t0.sum(l0.c, l0.a)
+    t1.sum(l1.c, l1.a)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, ZZ)
+    V.diff2xMod(V, XX)
+    f.c0.c1.redc2x(V)
+
+    # r1 = ξ v2 = ξ(y, 0).(y', 0) = ξ(yy', 0) = (0, yy')
+    f.c1.c0.setZero()
+    f.c1.c1.redc2x(YY)
+
+    # r20 = zy'+z'y = (z+y)(z'+y') - zz' - yy'
+    # r21 = xy'+x'y = (x+y)(x'+y') - xx' - yy'
+    t0.sum(l0.c, l0.b)
+    t1.sum(l1.c, l1.b)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, ZZ)
+    V.diff2xMod(V, YY)
+    f.c2.c0.redc2x(V)
+
+    t0.sum(l0.a, l0.b)
+    t1.sum(l1.a, l1.b)
+    V.prod2x(t0, t1)
+    V.diff2xMod(V, XX)
+    V.diff2xMod(V, YY)
+    f.c2.c1.redc2x(V)
 
 # ############################################################
 #
@@ -1073,7 +1139,7 @@ func mul_sparse_by_abcdefghij00_quad_over_cube*[Fpk](
   # r0 = a0 b0 + ξ a1 b1
   # r1 = (a0 + a1) (b0 + b1) - a0 b0 - a1 b1
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var v0 {.noInit.}, v1 {.noInit.}, v2 {.noInit.}: Fpkdiv2
 
     # v2 <- (a0 + a1)(b0 + b1)
@@ -1147,7 +1213,7 @@ func mul_sparse_by_abcdef00ghij_quad_over_cube*[Fpk](
   # r0 = a0 b0 + ξ a1 b1
   # r1 = (a0 + a1) (b0 + b1) - a0 b0 - a1 b1
 
-  when Fpk.Name.has_large_field_elem():
+  when Fpk.Name.has_large_field_elem() or Fpk.Name.skipLazyReduction():
     var v0 {.noInit.}, v1 {.noInit.}, v2 {.noInit.}: Fpkdiv2
 
     # v2 <- (a0 + a1)(b0 + b1)
@@ -1225,50 +1291,89 @@ func mul_sparse_by_abcd00efghij_cube_over_quad*[Fpk](
   # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
   # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
 
-  var V0 {.noInit.}, V1 {.noInit.}, V2 {.noinit.}: doublePrec(Fpkdiv3)
-  var t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
-  var f2x{.noInit.}, g2x {.noinit.}: doublePrec(Fpkdiv3)
+  when Fpk.Name.skipLazyReduction():
+    # Same formulas with single-width products, see `skipLazyReduction`.
+    # Outputs are written so that each one only overwrites inputs no longer needed:
+    # r₂ (reads a₀, a₂), then r₁ (reads a₀, a₁), then r₀ from the saved a₁ + a₂.
+    var v0 {.noInit.}, v1 {.noInit.}, v2 {.noInit.}: Fpkdiv3
+    var s12 {.noInit.}, t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
 
-  V0.prod2x(a.c0, b.c0)
-  V1.mul2x_sparse_by_0y(a.c1, b.c1)
-  V2.prod2x(a.c2, b.c2)
+    v0.prod(a.c0, b.c0)
+    v1.mul_sparse_by_0y(a.c1, b.c1)
+    v2.prod(a.c2, b.c2)
+    s12.sum(a.c1, a.c2)
 
-  # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
-  t0.sum(a.c1, a.c2)
-  t1.c1.sum(b.c1.c1, b.c2.c1)             # b₁ = (  0, b11)
-  f2x.prod2x_disjoint(t0, b.c2.c0, t1.c1) # (a₁ + a₂).(b₁ + b₂)
-  f2x.diff2xMod(f2x, V1)
-  f2x.diff2xMod(f2x, V2)
-  f2x.prod2x(f2x, NonResidue)
-  f2x.sum2xMod(f2x, V0)
+    # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
+    t0.sum(a.c0, a.c2)
+    t1.sum(b.c0, b.c2)
+    a.c2.prod(t0, t1)
+    a.c2 -= v0
+    a.c2 -= v2
+    a.c2 += v1
 
-  # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁
-  t0.sum(a.c0, a.c1)
-  t1.c1.sum(b.c0.c1, b.c1.c1)             # b₁ = (  0, b11)
-  g2x.prod2x_disjoint(t0, b.c0.c0, t1.c1) # (a₀ + a₁).(b₀ + b₁)
-  g2x.diff2xMod(g2x, V0)
-  g2x.diff2xMod(g2x, V1)
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + ξ v₂
+    t0.sum(a.c0, a.c1)
+    t1.c0 = b.c0.c0
+    t1.c1.sum(b.c0.c1, b.c1.c1)             # b₁ = (  0, b11)
+    a.c1.prod(t0, t1)
+    a.c1 -= v0
+    a.c1 -= v1
+    t0.prod(v2, NonResidue)
+    a.c1 += t0
 
-  # r₂ = (a₀ + a₂) and (b₀ + b₂)
-  t0.sum(a.c0, a.c2)
-  t1.sum(b.c0, b.c2)
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    t1.c0 = b.c2.c0
+    t1.c1.sum(b.c1.c1, b.c2.c1)             # b₁ = (  0, b11)
+    a.c0.prod(s12, t1)
+    a.c0 -= v1
+    a.c0 -= v2
+    a.c0 *= NonResidue
+    a.c0 += v0
+  else: # Lazy reduction
+    var V0 {.noInit.}, V1 {.noInit.}, V2 {.noinit.}: doublePrec(Fpkdiv3)
+    var t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
+    var f2x{.noInit.}, g2x {.noinit.}: doublePrec(Fpkdiv3)
 
-  # Now we are aliasing free
+    V0.prod2x(a.c0, b.c0)
+    V1.mul2x_sparse_by_0y(a.c1, b.c1)
+    V2.prod2x(a.c2, b.c2)
 
-  # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
-  a.c0.redc2x(f2x)
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    t0.sum(a.c1, a.c2)
+    t1.c1.sum(b.c1.c1, b.c2.c1)             # b₁ = (  0, b11)
+    f2x.prod2x_disjoint(t0, b.c2.c0, t1.c1) # (a₁ + a₂).(b₁ + b₂)
+    f2x.diff2xMod(f2x, V1)
+    f2x.diff2xMod(f2x, V2)
+    f2x.prod2x(f2x, NonResidue)
+    f2x.sum2xMod(f2x, V0)
 
-  # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
-  f2x.prod2x(V2, NonResidue)
-  g2x.sum2xMod(g2x, f2x)
-  a.c1.redc2x(g2x)
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁
+    t0.sum(a.c0, a.c1)
+    t1.c1.sum(b.c0.c1, b.c1.c1)             # b₁ = (  0, b11)
+    g2x.prod2x_disjoint(t0, b.c0.c0, t1.c1) # (a₀ + a₁).(b₀ + b₁)
+    g2x.diff2xMod(g2x, V0)
+    g2x.diff2xMod(g2x, V1)
 
-  # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
-  f2x.prod2x(t0, t1)
-  f2x.diff2xMod(f2x, V0)
-  f2x.diff2xMod(f2x, V2)
-  f2x.sum2xMod(f2x, V1)
-  a.c2.redc2x(f2x)
+    # r₂ = (a₀ + a₂) and (b₀ + b₂)
+    t0.sum(a.c0, a.c2)
+    t1.sum(b.c0, b.c2)
+
+    # Now we are aliasing free
+
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    a.c0.redc2x(f2x)
+
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
+    f2x.prod2x(V2, NonResidue)
+    g2x.sum2xMod(g2x, f2x)
+    a.c1.redc2x(g2x)
+
+    # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
+    f2x.prod2x(t0, t1)
+    f2x.diff2xMod(f2x, V0)
+    f2x.diff2xMod(f2x, V2)
+    f2x.sum2xMod(f2x, V1)
+    a.c2.redc2x(f2x)
 
 func mul_sparse_by_abcdefghij00_cube_over_quad*[Fpk](
        a: var Fpk, b: Fpk) =
@@ -1296,50 +1401,89 @@ func mul_sparse_by_abcdefghij00_cube_over_quad*[Fpk](
   # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
   # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
 
-  var V0 {.noInit.}, V1 {.noInit.}, V2 {.noinit.}: doublePrec(Fpkdiv3)
-  var t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
-  var f2x{.noInit.}, g2x {.noinit.}: doublePrec(Fpkdiv3)
+  when Fpk.Name.skipLazyReduction():
+    # Same formulas with single-width products, see `skipLazyReduction`.
+    # Outputs are written so that each one only overwrites inputs no longer needed:
+    # r₁ (reads a₀, a₁), then r₂ (reads a₀, a₂), then r₀ from the saved a₁ + a₂.
+    var v0 {.noInit.}, v1 {.noInit.}, v2 {.noInit.}: Fpkdiv3
+    var s12 {.noInit.}, t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
 
-  V0.prod2x(a.c0, b.c0)
-  V1.prod2x(a.c1, b.c1)
-  V2.mul2x_sparse_by_x0(a.c2, b.c2)
+    v0.prod(a.c0, b.c0)
+    v1.prod(a.c1, b.c1)
+    v2.mul_sparse_by_x0(a.c2, b.c2)
+    s12.sum(a.c1, a.c2)
 
-  # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
-  t0.sum(a.c1, a.c2)
-  t1.c0.sum(b.c1.c0, b.c2.c0)             # b₂ = (b20,   0)
-  f2x.prod2x_disjoint(t0, t1.c0, b.c1.c1) # (a₁ + a₂).(b₁ + b₂)
-  f2x.diff2xMod(f2x, V1)
-  f2x.diff2xMod(f2x, V2)
-  f2x.prod2x(f2x, NonResidue)
-  f2x.sum2xMod(f2x, V0)
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + ξ v₂
+    t0.sum(a.c0, a.c1)
+    t1.sum(b.c0, b.c1)
+    a.c1.prod(t0, t1)
+    a.c1 -= v0
+    a.c1 -= v1
+    t0.prod(v2, NonResidue)
+    a.c1 += t0
 
-  # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁
-  t0.sum(a.c0, a.c1)
-  t1.sum(b.c0, b.c1)
-  g2x.prod2x(t0, t1)
-  g2x.diff2xMod(g2x, V0)
-  g2x.diff2xMod(g2x, V1)
+    # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
+    t0.sum(a.c0, a.c2)
+    t1.c0.sum(b.c0.c0, b.c2.c0)             # b₂ = (b20,   0)
+    t1.c1 = b.c0.c1
+    a.c2.prod(t0, t1)
+    a.c2 -= v0
+    a.c2 -= v2
+    a.c2 += v1
 
-  # r₂ = (a₀ + a₂) and (b₀ + b₂)
-  t0.sum(a.c0, a.c2)
-  t1.c0.sum(b.c0.c0, b.c2.c0)             # b₂ = (b20,   0)
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    t1.c0.sum(b.c1.c0, b.c2.c0)             # b₂ = (b20,   0)
+    t1.c1 = b.c1.c1
+    a.c0.prod(s12, t1)
+    a.c0 -= v1
+    a.c0 -= v2
+    a.c0 *= NonResidue
+    a.c0 += v0
+  else: # Lazy reduction
+    var V0 {.noInit.}, V1 {.noInit.}, V2 {.noinit.}: doublePrec(Fpkdiv3)
+    var t0 {.noInit.}, t1 {.noInit.}: Fpkdiv3
+    var f2x{.noInit.}, g2x {.noinit.}: doublePrec(Fpkdiv3)
 
-  # Now we are aliasing free
+    V0.prod2x(a.c0, b.c0)
+    V1.prod2x(a.c1, b.c1)
+    V2.mul2x_sparse_by_x0(a.c2, b.c2)
 
-  # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
-  a.c0.redc2x(f2x)
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    t0.sum(a.c1, a.c2)
+    t1.c0.sum(b.c1.c0, b.c2.c0)             # b₂ = (b20,   0)
+    f2x.prod2x_disjoint(t0, t1.c0, b.c1.c1) # (a₁ + a₂).(b₁ + b₂)
+    f2x.diff2xMod(f2x, V1)
+    f2x.diff2xMod(f2x, V2)
+    f2x.prod2x(f2x, NonResidue)
+    f2x.sum2xMod(f2x, V0)
 
-  # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
-  f2x.prod2x(V2, NonResidue)
-  g2x.sum2xMod(g2x, f2x)
-  a.c1.redc2x(g2x)
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁
+    t0.sum(a.c0, a.c1)
+    t1.sum(b.c0, b.c1)
+    g2x.prod2x(t0, t1)
+    g2x.diff2xMod(g2x, V0)
+    g2x.diff2xMod(g2x, V1)
 
-  # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
-  f2x.prod2x_disjoint(t0, t1.c0, b.c0.c1)
-  f2x.diff2xMod(f2x, V0)
-  f2x.diff2xMod(f2x, V2)
-  f2x.sum2xMod(f2x, V1)
-  a.c2.redc2x(f2x)
+    # r₂ = (a₀ + a₂) and (b₀ + b₂)
+    t0.sum(a.c0, a.c2)
+    t1.c0.sum(b.c0.c0, b.c2.c0)             # b₂ = (b20,   0)
+
+    # Now we are aliasing free
+
+    # r₀ = ξ ((a₁ + a₂)(b₁ + b₂) - v₁ - v₂) + v₀
+    a.c0.redc2x(f2x)
+
+    # r₁ = (a₀ + a₁) * (b₀ + b₁) - v₀ - v₁ + β v₂
+    f2x.prod2x(V2, NonResidue)
+    g2x.sum2xMod(g2x, f2x)
+    a.c1.redc2x(g2x)
+
+    # r₂ = (a₀ + a₂) * (b₀ + b₂) - v₀ - v₂ + v₁
+    f2x.prod2x_disjoint(t0, t1.c0, b.c0.c1)
+    f2x.diff2xMod(f2x, V0)
+    f2x.diff2xMod(f2x, V2)
+    f2x.sum2xMod(f2x, V1)
+    a.c2.redc2x(f2x)
 
 # Dispatch
 # ------------------------------------------------------------
