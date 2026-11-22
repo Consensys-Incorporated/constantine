@@ -857,6 +857,18 @@ func prod_complex(r: var Fp2, a, b: Fp2) {.meter, used.} =
   # - 2 Addition 𝔽p
   # Stack: 6 * ModulusBitSize (4x 𝔽p element + 2x named temporaries + 1 in-place multiplication temporary)
   static: doAssert r.fromComplexExtension()
+  when Fp2.Name.skipLazyReduction():
+    # Accelerated products: the naive formula directly, avoiding the
+    # sumprod argument arrays (memcpy) and the negation.
+    # All reads happen before the writes to r, so r may alias a or b.
+    var t0 {.noInit.}, t1 {.noInit.}, t2 {.noInit.}, t3 {.noInit.}: typeof(r.c0)
+    t0.prod(a.c0, b.c0)
+    t1.prod(a.c1, b.c1)
+    t2.prod(a.c0, b.c1)
+    t3.prod(a.c1, b.c0)
+    r.c0.diff(t0, t1)
+    r.c1.sum(t2, t3)
+    return
   var t {.noInit.}: typeof(r)
   var na1 {.noInit.}: typeof(r.c0)
   na1.neg(a.c1)
@@ -1391,7 +1403,7 @@ func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
 
   when r.fromComplexExtension():
     when QuadraticExt.Name.skipLazyReduction():
-      # Accelerated Fp multiplication: 4 single-width products (2 sumprod)
+      # Accelerated Fp multiplication: 4 direct single-width products
       # beat 3 double-width products + 2 redc2x, see `skipLazyReduction`.
       r.prod_complex(a, b)
     elif UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem():
