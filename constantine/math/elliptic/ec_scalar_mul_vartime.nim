@@ -9,6 +9,7 @@
 import
   # Internals
   ./ec_shortweierstrass_affine,
+  ./ec_shortweierstrass_affine_vartime,
   ./ec_shortweierstrass_jacobian,
   ./ec_shortweierstrass_projective,
   ./ec_twistededwards_affine,
@@ -484,6 +485,18 @@ func accumWnafDigit[EC, ECaff](
     if negate: P ~+= tab[(-digit) shr 1]
     else:      P ~-= tab[(-digit) shr 1]
 
+func accumWnafDigitAff[ECaff](
+       P: var ECaff,
+       tab: openArray[ECaff],
+       digit: int8, negate: bool) {.inline.} =
+  ## Affine accumulator version of accumWnafDigit
+  if digit > 0:
+    if negate: P.affineDiff_vartime(P, tab[digit shr 1])
+    else:      P.affineSum_vartime(P, tab[digit shr 1])
+  elif digit < 0:
+    if negate: P.affineSum_vartime(P, tab[(-digit) shr 1])
+    else:      P.affineDiff_vartime(P, tab[(-digit) shr 1])
+
 func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
        r: var EC,
        u1: BigInt[scalBits],
@@ -522,13 +535,21 @@ func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
   # 2. Odd multiples of Q and of φ(Q), φ(x, y) = (βx, y) preserves the multiples
   var tabQ {.noInit.}, tabEndoQ {.noInit.}: array[tabQLen, ECaff]
   block:
-    var tabJac {.noInit.}: array[tabQLen, EC]
-    var Q2 {.noInit.}: EC
-    tabJac[0].fromAffine(Q)
-    Q2.double(tabJac[0])
-    for i in 1 ..< tabQLen:
-      tabJac[i].sum_vartime(tabJac[i-1], Q2)
-    tabQ.batchAffine_vartime(tabJac)
+    when ECaff.F.useAffineVartime():
+      # Accelerated division: build the table directly in affine coordinates
+      var Q2 {.noInit.}: ECaff
+      tabQ[0] = Q
+      Q2.affineDouble_vartime(Q)
+      for i in 1 ..< tabQLen:
+        tabQ[i].affineSum_vartime(tabQ[i-1], Q2)
+    else:
+      var tabJac {.noInit.}: array[tabQLen, EC]
+      var Q2 {.noInit.}: EC
+      tabJac[0].fromAffine(Q)
+      Q2.double(tabJac[0])
+      for i in 1 ..< tabQLen:
+        tabJac[i].sum_vartime(tabJac[i-1], Q2)
+      tabQ.batchAffine_vartime(tabJac)
     for i in 0 ..< tabQLen:
       tabEndoQ[i].computeEndomorphism(tabQ[i])
 
@@ -542,14 +563,26 @@ func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
   nafLen = max(nafLen, nafs[3].recode_r2l_signed_window_vartime(k2[1], windowQ))
 
   # 4. Interleaved double-and-add from the most significant digit
-  r.setNeutral()
-  for i in countdown(nafLen-1, 0):
-    if not r.isNeutral().bool:
-      r.double()
-    r.accumWnafDigit(tabG,     nafs[0][i], neg1[0].bool)
-    r.accumWnafDigit(tabEndoG, nafs[1][i], neg1[1].bool)
-    r.accumWnafDigit(tabQ,     nafs[2][i], neg2[0].bool)
-    r.accumWnafDigit(tabEndoQ, nafs[3][i], neg2[1].bool)
+  when ECaff.F.useAffineVartime():
+    # Accelerated division: affine accumulator, see ec_shortweierstrass_affine_vartime
+    var acc {.noInit.}: ECaff
+    acc.setNeutral()
+    for i in countdown(nafLen-1, 0):
+      acc.affineDouble_vartime(acc) # [2]O = O
+      acc.accumWnafDigitAff(tabG,     nafs[0][i], neg1[0].bool)
+      acc.accumWnafDigitAff(tabEndoG, nafs[1][i], neg1[1].bool)
+      acc.accumWnafDigitAff(tabQ,     nafs[2][i], neg2[0].bool)
+      acc.accumWnafDigitAff(tabEndoQ, nafs[3][i], neg2[1].bool)
+    r.fromAffine(acc)
+  else:
+    r.setNeutral()
+    for i in countdown(nafLen-1, 0):
+      if not r.isNeutral().bool:
+        r.double()
+      r.accumWnafDigit(tabG,     nafs[0][i], neg1[0].bool)
+      r.accumWnafDigit(tabEndoG, nafs[1][i], neg1[1].bool)
+      r.accumWnafDigit(tabQ,     nafs[2][i], neg2[0].bool)
+      r.accumWnafDigit(tabEndoQ, nafs[3][i], neg2[1].bool)
 
 # ############################################################
 #
