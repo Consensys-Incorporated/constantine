@@ -467,6 +467,20 @@ func square_repeated*(r: var FF, a: FF, num: int, lazyReduce: static bool = fals
     r.square(lazyReduce = true)
   r.square(lazyReduce)
 
+func smallIntConstant(F: type FF, b: static int): F =
+  ## The field element b, for a small integer b known at compile-time,
+  ## in the plain [0, p) representation of accelerated fields.
+  ## Only evaluated at compile-time (`const`): a runtime temporary would be
+  ## zero-initialised, i.e. a memset call on freestanding RV64 builds.
+  static: doAssert F.hasExtFieldMul()
+  when b >= 0:
+    result.mres.limbs[0] = SecretWord(b)
+  else:
+    # p - |b|: no borrow out of the lowest limb for supported moduli
+    static: doAssert BaseType(F.getModulus().limbs[0]) > BaseType(-b)
+    result.mres = F.getModulus()
+    result.mres.limbs[0] = result.mres.limbs[0] - SecretWord(-b)
+
 func `*=`*(a: var FF, b: static int) =
   ## Multiplication by a small integer known at compile-time
   # Implementation:
@@ -481,98 +495,111 @@ func `*=`*(a: var FF, b: static int) =
   # - n² passes over the data, each of 5~6 elementary addition/multiplication
   # - a conditional substraction
   #
-  const negate = b < 0
-  const b = if negate: -b
-            else: b
-  when negate:
-    a.neg(a)
-  when b == 0:
-    a.setZero()
-  elif b == 1:
-    return
-  elif b == 2:
-    a.double()
-  elif b == 3:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    a += t
-  elif b == 4:
-    a.double()
-    a.double()
-  elif b == 5:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t.double()
-    a += t
-  elif b == 6:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t += a # 3
-    a.double(t)
-  elif b == 7:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t.double()
-    t.double()
-    a.diff(t, a)
-  elif b == 8:
-    a.double()
-    a.double()
-    a.double()
-  elif b == 9:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t.double()
-    t.double()
-    a.sum(t, a)
-  elif b == 10:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t.double()
-    a += t     # 5
-    a.double()
-  elif b == 11:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t += a       # 3
-    t.double()   # 6
-    t.double()   # 12
-    a.diff(t, a) # 11
-  elif b == 12:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t += a       # 3
-    t.double()   # 6
-    a.double(t)   # 12
-  elif b == 15:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t += a       # 3
-    a.double(t)  # 6
-    a.double()   # 12
-    a += t       # 15
-  elif b == 21:
-    var t {.noInit.}: typeof(a)
-    t.double(a)
-    t.double()   # 4
-    t += a       # 5
-    t.double()   # 10
-    t.double()   # 20
-    a += t       # 21
-
+  when FF.hasExtFieldMul() and (b >= 2 or b <= -1):
+    # With the external accelerator, a MUL is 1 call (~11 instructions on RV64)
+    # while each software addition/doubling of the chain below is a full
+    # constant-time modular add (~40+ instructions for 4 limbs).
+    # Plain-representation fields store the integer b, or p - |b| if b < 0, as is.
+    const k = FF.smallIntConstant(b)
+    a.extFieldProd(a, k)
   else:
-    {.error: "Multiplication by this small int not implemented".}
+    const negate = b < 0
+    const b = if negate: -b
+              else: b
+    when negate:
+      a.neg(a)
+    when b == 0:
+      a.setZero()
+    elif b == 1:
+      return
+    elif b == 2:
+      a.double()
+    elif b == 3:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      a += t
+    elif b == 4:
+      a.double()
+      a.double()
+    elif b == 5:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t.double()
+      a += t
+    elif b == 6:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t += a # 3
+      a.double(t)
+    elif b == 7:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t.double()
+      t.double()
+      a.diff(t, a)
+    elif b == 8:
+      a.double()
+      a.double()
+      a.double()
+    elif b == 9:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t.double()
+      t.double()
+      a.sum(t, a)
+    elif b == 10:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t.double()
+      a += t     # 5
+      a.double()
+    elif b == 11:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t += a       # 3
+      t.double()   # 6
+      t.double()   # 12
+      a.diff(t, a) # 11
+    elif b == 12:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t += a       # 3
+      t.double()   # 6
+      a.double(t)   # 12
+    elif b == 15:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t += a       # 3
+      a.double(t)  # 6
+      a.double()   # 12
+      a += t       # 15
+    elif b == 21:
+      var t {.noInit.}: typeof(a)
+      t.double(a)
+      t.double()   # 4
+      t += a       # 5
+      t.double()   # 10
+      t.double()   # 20
+      a += t       # 21
+
+    else:
+      {.error: "Multiplication by this small int not implemented".}
 
 func prod*(r: var FF, a: FF, b: static int) =
   ## Multiplication by a small integer known at compile-time
-  const negate = b < 0
-  const b = if negate: -b
-            else: b
-  when negate:
-    r.neg(a)
+  when FF.hasExtFieldMul() and (b >= 2 or b <= -1):
+    # 1 accelerator MUL instead of a software addition chain, see `*=`
+    const k = FF.smallIntConstant(b)
+    r.extFieldProd(a, k)
   else:
-    r = a
-  r *= b
+    const negate = b < 0
+    const b = if negate: -b
+              else: b
+    when negate:
+      r.neg(a)
+    else:
+      r = a
+    r *= b
 
 template mulCheckSparse*(a: var Fp, b: Fp) =
   ## Multiplication with optimization for sparse inputs
