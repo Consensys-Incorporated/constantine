@@ -601,6 +601,19 @@ func accumWnafDigitAff[ECaff](
     if negate: P.affineSum_vartime(P, tab[(-digit) shr 1])
     else:      P.affineDiff_vartime(P, tab[(-digit) shr 1])
 
+func accumWnafDigitDblAff[ECaff](
+       P: var ECaff,
+       tab: openArray[ECaff],
+       digit: int8, negate: bool) {.inline.} =
+  ## P <- [2]P ± [|digit|]B with tab[i] = [2i+1]B, digit ≠ 0,
+  ## the sign being the sign of digit, flipped if `negate`
+  if digit > 0:
+    if negate: P.affineDoubleDiff_vartime(P, tab[digit shr 1])
+    else:      P.affineDoubleSum_vartime(P, tab[digit shr 1])
+  else:
+    if negate: P.affineDoubleSum_vartime(P, tab[(-digit) shr 1])
+    else:      P.affineDoubleDiff_vartime(P, tab[(-digit) shr 1])
+
 func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
        r: var EC,
        u1: BigInt[scalBits],
@@ -669,14 +682,25 @@ func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
   # 4. Interleaved double-and-add from the most significant digit
   when ECaff.F.useAffineVartime():
     # Accelerated division: affine accumulator, see ec_shortweierstrass_affine_vartime
+    # The doubling is fused with the first non-zero digit of each step: acc <- [2]acc ± T
     var acc {.noInit.}: ECaff
     acc.setNeutral()
+    var doubled: bool
+    template accum(tab: untyped, digit: int8, negate: bool) =
+      if digit != 0:
+        if doubled:
+          acc.accumWnafDigitAff(tab, digit, negate)
+        else:
+          acc.accumWnafDigitDblAff(tab, digit, negate)
+          doubled = true
     for i in countdown(nafLen-1, 0):
-      acc.affineDouble_vartime(acc) # [2]O = O
-      acc.accumWnafDigitAff(tabG,     nafs[0][i], neg1[0].bool)
-      acc.accumWnafDigitAff(tabEndoG, nafs[1][i], neg1[1].bool)
-      acc.accumWnafDigitAff(tabQ,     nafs[2][i], neg2[0].bool)
-      acc.accumWnafDigitAff(tabEndoQ, nafs[3][i], neg2[1].bool)
+      doubled = false
+      accum(tabG,     nafs[0][i], neg1[0].bool)
+      accum(tabEndoG, nafs[1][i], neg1[1].bool)
+      accum(tabQ,     nafs[2][i], neg2[0].bool)
+      accum(tabEndoQ, nafs[3][i], neg2[1].bool)
+      if not doubled:
+        acc.affineDouble_vartime(acc) # [2]O = O
     r.fromAffine(acc)
   else:
     r.setNeutral()

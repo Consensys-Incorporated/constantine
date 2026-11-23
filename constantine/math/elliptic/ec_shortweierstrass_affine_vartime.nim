@@ -217,4 +217,89 @@ func affineDiff_vartime*[F; G: static Subgroup](
   else:
     r.affineSumImpl_vartime(P, Q, negateQ = true)
 
+func affineDoubleSumImpl_vartime[F; G: static Subgroup](
+       r: var EC_ShortW_Aff[F, G],
+       P, Q: EC_ShortW_Aff[F, G],
+       negateQ: static bool) {.inline.} =
+  ## r <- [2]P ± Q, P and Q not neutral. r may alias P or Q.
+  # Eisenträger-Lauter-Montgomery, https://eprint.iacr.org/2003/257:
+  # [2]P + Q = (P + Q) + P without computing y(P + Q)
+  #   λ₁ = (y_Q - y_P)/(x_Q - x_P)
+  #   x₃ = λ₁² - x_P - x_Q                      x(P + Q)
+  #   λ₂ = (y_P - y₃)/(x_P - x₃) = -λ₁ - 2y_P/(x₃ - x_P)
+  #   x₄ = λ₂² - x_P - x₃
+  #   y₄ = λ₂(x_P - x₄) - y_P = λ'(x₄ - x_P) - y_P with λ' = -λ₂ = λ₁ + 2y_P/(x₃ - x_P)
+  # 6 calls (2 DIV, 2 S, 1 M, 1 MUL by 2) + 10 add/sub instead of 8 calls + 10 add/sub.
+  var num {.noInit.}, den {.noInit.}: F
+  when negateQ:
+    num.sum(P.y, Q.y)
+    den.diff(P.x, Q.x)
+  else:
+    num.diff(Q.y, P.y)
+    den.diff(Q.x, P.x)
+
+  if den.isZero().bool:
+    # Q = ±P (or ∓P for [2]P - Q): no shortcut, P ± Q may be [2]P or neutral
+    var t {.noInit.}: typeof(r)
+    t.affineSumImpl_vartime(P, Q, negateQ)
+    r.affineSum_vartime(t, P)
+    return
+
+  var lambda {.noInit.}, x3 {.noInit.}: F
+  lambda.div_vartime(num, den)       # λ₁
+  x3.square(lambda)
+  x3 -= P.x
+  x3 -= Q.x                          # x₃ = λ₁² - x_P - x_Q (x(-Q) = x(Q))
+
+  den.diff(x3, P.x)
+  if den.isZero().bool:
+    # P + Q = ±P, i.e. P + Q = -P as Q ≠ O: [2]P + Q = P + (P + Q) = O
+    r.setNeutral()
+    return
+  num.div_vartime(P.y, den)          # y_P/(x₃ - x_P)
+  num *= 2
+  lambda += num                      # λ' = λ₁ + 2y_P/(x₃ - x_P)
+
+  num.square(lambda)
+  num -= P.x
+  num -= x3                          # x₄ = λ'² - x_P - x₃
+  den.diff(num, P.x)
+  den *= lambda
+  r.y.diff(den, P.y)                 # y₄ = λ'(x₄ - x_P) - y_P
+  r.x = num
+
+func affineDoubleSum_vartime*[F; G: static Subgroup](
+       r: var EC_ShortW_Aff[F, G],
+       P, Q: EC_ShortW_Aff[F, G]) {.tags:[VarTime].} =
+  ## **Variable-time** fused affine r <- [2]P + Q for a = 0 curves.
+  ## Handles all exceptional cases. r may alias P or Q.
+  ##
+  ## This MUST NOT be used with secret data.
+  static: doAssert F.Name.getCoefA() == 0
+  if P.isNeutral_vartime():
+    r = Q
+  elif Q.isNeutral_vartime():
+    r.affineDouble_vartime(P)
+  elif P.y.isZero().bool:
+    r = Q # [2]P = O for 2-torsion (impossible on prime-order groups)
+  else:
+    r.affineDoubleSumImpl_vartime(P, Q, negateQ = false)
+
+func affineDoubleDiff_vartime*[F; G: static Subgroup](
+       r: var EC_ShortW_Aff[F, G],
+       P, Q: EC_ShortW_Aff[F, G]) {.tags:[VarTime].} =
+  ## **Variable-time** fused affine r <- [2]P - Q for a = 0 curves.
+  ## Handles all exceptional cases. r may alias P or Q.
+  ##
+  ## This MUST NOT be used with secret data.
+  static: doAssert F.Name.getCoefA() == 0
+  if P.isNeutral_vartime():
+    r.neg(Q)
+  elif Q.isNeutral_vartime():
+    r.affineDouble_vartime(P)
+  elif P.y.isZero().bool:
+    r.neg(Q)
+  else:
+    r.affineDoubleSumImpl_vartime(P, Q, negateQ = true)
+
 {.pop.}

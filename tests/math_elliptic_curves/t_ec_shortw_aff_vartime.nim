@@ -106,6 +106,29 @@ proc testAffineVartime(EC: typedesc) =
     r.affineDiff_vartime(O, O); doAssert bool(r.isNeutral())
     r.affineDouble_vartime(O);  doAssert bool(r.isNeutral())
 
+    # Fused [2]P ± Q, also aliasing, and exceptional cases
+    block:
+      let P2Q = refSum(P2, Q)
+      let P2mQ = refSum(P2, Q.negated())
+      let P3 = refSum(P2, P)
+      r.affineDoubleSum_vartime(P, Q);  doAssert bool(r == P2Q)
+      r.affineDoubleDiff_vartime(P, Q); doAssert bool(r == P2mQ)
+      r = P; r.affineDoubleSum_vartime(r, Q);  doAssert bool(r == P2Q)
+      r = Q; r.affineDoubleSum_vartime(P, r);  doAssert bool(r == P2Q)
+      r = P; r.affineDoubleDiff_vartime(r, Q); doAssert bool(r == P2mQ)
+      r = Q; r.affineDoubleDiff_vartime(P, r); doAssert bool(r == P2mQ)
+      r.affineDoubleSum_vartime(P, P);               doAssert bool(r == P3)
+      r.affineDoubleSum_vartime(P, P.negated());     doAssert bool(r == P)
+      r.affineDoubleSum_vartime(P, P2.negated());    doAssert bool(r.isNeutral())
+      r.affineDoubleDiff_vartime(P, P);              doAssert bool(r == P)
+      r.affineDoubleDiff_vartime(P, P.negated());    doAssert bool(r == P3)
+      r.affineDoubleDiff_vartime(P, P2);             doAssert bool(r.isNeutral())
+      r.affineDoubleSum_vartime(O, Q);  doAssert bool(r == Q)
+      r.affineDoubleDiff_vartime(O, Q); doAssert bool(r == Q.negated())
+      r.affineDoubleSum_vartime(P, O);  doAssert bool(r == P2)
+      r.affineDoubleDiff_vartime(P, O); doAssert bool(r == P2)
+      r.affineDoubleSum_vartime(O, O);  doAssert bool(r.isNeutral())
+
     # Chains vs Jacobian: acc <- 2·acc ± Pₖ
     var acc = P
     var jacc: EC_ShortW_Jac[F, EC.G]
@@ -151,6 +174,9 @@ proc testAffineVartime(EC: typedesc) =
       doAssert mock_zkvm_field_op_total() == 3, $mock_zkvm_field_op_total()
       mock_zkvm_field_op_reset()
       r.affineDouble_vartime(P)
+      doAssert mock_zkvm_field_op_total() == 5, $mock_zkvm_field_op_total()
+      mock_zkvm_field_op_reset()
+      r.affineDoubleSum_vartime(P, Q)
       doAssert mock_zkvm_field_op_total() == 5, $mock_zkvm_field_op_total()
       mock_zkvm_field_op_reset()
       var d {.noInit.}: F
