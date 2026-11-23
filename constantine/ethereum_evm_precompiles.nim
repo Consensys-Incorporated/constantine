@@ -346,8 +346,13 @@ func fromRawCoords[Name: static Algebra, G: static Subgroup](
     return cttEVM_PointNotOnCurve
 
   if checkSubgroup:
-    if not dst.isInSubgroup().bool:
-      return cttEVM_PointNotInSubgroup
+    # Precompile inputs are public: variable-time check when available
+    when Name == BLS12_381:
+      if not dst.isInSubgroup_vartime().bool:
+        return cttEVM_PointNotInSubgroup
+    else:
+      if not dst.isInSubgroup().bool:
+        return cttEVM_PointNotInSubgroup
 
   return cttEVM_Success
 
@@ -387,8 +392,13 @@ func fromRawCoords[Name: static Algebra](
     return cttEVM_PointNotOnCurve
 
   if checkSubgroup:
-    if not dst.isInSubgroup().bool:
-      return cttEVM_PointNotInSubgroup
+    # Precompile inputs are public: variable-time check when available
+    when Name == BLS12_381:
+      if not dst.isInSubgroup_vartime().bool:
+        return cttEVM_PointNotInSubgroup
+    else:
+      if not dst.isInSubgroup().bool:
+        return cttEVM_PointNotInSubgroup
 
   return cttEVM_Success
 

@@ -197,6 +197,26 @@ proc testScalarMulVartime(EC: typedesc) =
     O.scalarMul_vartime(k)
     doAssert bool(O.isNeutral())
 
+proc testSubgroupVartime(EC: typedesc) =
+  ## isInSubgroup_vartime (affine when useAffineVartime) vs constant-time isInSubgroup
+  echo "    ", $EC
+  var inG, notInG = 0
+  for i in 0 ..< Iters:
+    var P = rng.random_unsafe(EC)   # on curve, almost never in the subgroup
+    if i mod 2 == 0:
+      var J {.noInit.}: EC_ShortW_Jac[EC.F, EC.G]
+      J.fromAffine(P)
+      J.clearCofactor()
+      P.affine(J)
+    let expected = P.isInSubgroup().bool
+    doAssert P.isInSubgroup_vartime().bool == expected, "isInSubgroup_vartime mismatch for " & $EC
+    if expected: inG += 1 else: notInG += 1
+  doAssert inG >= Iters div 2 and notInG > 0
+  var O: EC
+  O.setNeutral()
+  doAssert O.isInSubgroup_vartime().bool
+  doAssert O.isInSubgroup().bool
+
 suite "Variable-time affine arithmetic for a = 0 curves" & " [" & $WordBitWidth & "-bit words]":
   test "Sum, difference, doubling and exceptional cases vs Jacobian":
     testAffineVartime(EC_ShortW_Aff[Fp[Secp256k1], G1])
@@ -214,3 +234,7 @@ suite "Variable-time affine arithmetic for a = 0 curves" & " [" & $WordBitWidth 
     testScalarMulVartime(EC_ShortW_Prj[Fp[BLS12_381], G1])
     testScalarMulVartime(EC_ShortW_Jac[Fp2[BLS12_381], G2])
     testScalarMulVartime(EC_ShortW_Prj[Fp2[BLS12_381], G2])
+
+  test "isInSubgroup_vartime vs constant-time isInSubgroup (BLS12-381)":
+    testSubgroupVartime(EC_ShortW_Aff[Fp[BLS12_381], G1])
+    testSubgroupVartime(EC_ShortW_Aff[Fp2[BLS12_381], G2])
