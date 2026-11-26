@@ -1056,7 +1056,11 @@ func prod2x_disjoint*[Fdbl, F](
   var V0 {.noInit.}, V1 {.noInit.}: typeof(r.c0) # Double-precision
   var t0 {.noInit.}, t1 {.noInit.}: typeof(a0)   # Single-width
 
-  when F.has1extraBit():
+  # Unreduced sums are only safe when F is the base field:
+  # for an extension F (𝔽p2, 𝔽p6), F.prod2x adds its own unreduced sums
+  # on top, and on BN254 (2 spare bits) the products can exceed p·2ᴺ,
+  # the redc2x input bound, leaving non-canonical results.
+  when F is Fp and F.has1extraBit():
     t0.sumUnr(a0, a1)
     t1.sumUnr(b0, b1)
   else:
