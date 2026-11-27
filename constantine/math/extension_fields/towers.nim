@@ -741,6 +741,20 @@ func has_large_field_elem*(Name: static Algebra): bool =
   let a = default(Fp[Name])
   return a.mres.limbs.len > 6
 
+func skipLazyReduction*(Name: static Algebra): bool =
+  ## Returns true if extension fields over ``Fp[Name]`` must not use
+  ## lazy reduction (double-width products followed by a single ``redc2x``).
+  ##
+  ## This is the case when the base field multiplication goes through an
+  ## external accelerator (``-d:CTT_EXTERN_FIELD_ACCEL``, see ``hasExtFieldMul``):
+  ## a single-width ``prod`` is one accelerator call, whereas the lazy path
+  ## runs a software N×N→2N multiplication, double-width additions and a
+  ## ``redc2x`` that itself costs an accelerator call.
+  ## Dispatchers then select the single-width implementation.
+  ##
+  ## Always false without the accelerator, leaving default builds unchanged.
+  Fp[Name].hasExtFieldMul()
+
 # ############################################################
 #                                                            #
 #                  Quadratic extensions                      #
@@ -843,12 +857,24 @@ func prod_complex(r: var Fp2, a, b: Fp2) {.meter, used.} =
   # - 2 Addition 𝔽p
   # Stack: 6 * ModulusBitSize (4x 𝔽p element + 2x named temporaries + 1 in-place multiplication temporary)
   static: doAssert r.fromComplexExtension()
-  var t {.noInit.}: typeof(r)
-  var na1 {.noInit.}: typeof(r.c0)
-  na1.neg(a.c1)
-  t.c0.sumprod([a.c0, na1], [b.c0, b.c1])
-  t.c1.sumprod([a.c0, a.c1], [b.c1, b.c0])
-  r = t
+  when Fp2.Name.skipLazyReduction():
+    # Accelerated products: the naive formula directly, avoiding the
+    # sumprod argument arrays (memcpy) and the negation.
+    # All reads happen before the writes to r, so r may alias a or b.
+    var t0 {.noInit.}, t1 {.noInit.}, t2 {.noInit.}, t3 {.noInit.}: typeof(r.c0)
+    t0.prod(a.c0, b.c0)
+    t1.prod(a.c1, b.c1)
+    t2.prod(a.c0, b.c1)
+    t3.prod(a.c1, b.c0)
+    r.c0.diff(t0, t1)
+    r.c1.sum(t2, t3)
+  else:
+    var t {.noInit.}: typeof(r)
+    var na1 {.noInit.}: typeof(r.c0)
+    na1.neg(a.c1)
+    t.c0.sumprod([a.c0, na1], [b.c0, b.c1])
+    t.c1.sumprod([a.c0, a.c1], [b.c1, b.c0])
+    r = t
 
 func prod2x_complex(r: var QuadraticExt2x, a, b: Fp2) {.meter.} =
   ## Double-precision unreduced complex multiplication
@@ -1017,6 +1043,36 @@ func prodImpl_fp4o2_complex_snr_1pi[Name: static Algebra](r: var Fp4[Name], a, b
 
 # Multiplications (generic)
 # ----------------------------------------------------------------------
+
+func prod_disjoint_schoolbook*[F](r: var QuadraticExt[F], a: QuadraticExt[F], b0, b1: F) =
+  ## Returns r = a * (b0 + b1 𝑢) with schoolbook multiplication:
+  ##   r0 = a0 b0 + β a1 b1
+  ##   r1 = a0 b1 + a1 b0
+  ## 4 products instead of Karatsuba's 3 but 4 fewer additions/substractions.
+  ## Used when products are accelerated, see `skipLazyReduction`.
+  ## `r` may alias `a`, and `b0`/`b1` may alias coordinates of `r`.
+  var t0 {.noInit.}, t1 {.noInit.}, t2 {.noInit.}: F
+  t0.prod(a.c0, b0)
+  t1.prod(a.c1, b1)
+  t2.prod(a.c0, b1)
+  r.c1.prod(a.c1, b0)     # last read of a and b
+  r.c1 += t2
+  t1 *= NonResidue
+  r.c0.sum(t0, t1)
+
+func square_schoolbook[F](r: var QuadraticExt[F], a: QuadraticExt[F]) =
+  ## Returns r = a² with schoolbook squaring:
+  ##   r0 = a0² + β a1²
+  ##   r1 = 2 a0 a1
+  ## Used when products are accelerated, see `skipLazyReduction`.
+  ## `r` may alias `a`.
+  var t0 {.noInit.}, t1 {.noInit.}: F
+  t0.square(a.c0)
+  t1.square(a.c1)
+  r.c1.prod(a.c0, a.c1)   # last read of a
+  r.c1.double()
+  t1 *= NonResidue
+  r.c0.sum(t0, t1)
 
 func prod_generic(r: var QuadraticExt, a, b: QuadraticExt) =
   ## Returns r = a * b
@@ -1359,6 +1415,10 @@ func square*(r: var QuadraticExt, a: QuadraticExt) =
     when QuadraticExt.Name.has_large_field_elem():
       # BW6-761 requires too many registers for Dbl width path
       r.square_generic(a)
+    elif QuadraticExt.Name.skipLazyReduction():
+      # Single-width products, see `skipLazyReduction`.
+      # Schoolbook: fewest additions, which cost more than accelerated products.
+      r.square_schoolbook(a)
     elif QuadraticExt is Fp4[BLS12_377]:
       # TODO BLS12-377 slowness to fix
       r.square_generic(a)
@@ -1372,27 +1432,19 @@ func square*(a: var QuadraticExt) =
 func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
   ## Multiplication r <- a*b
 
-  # Note: when `Fp[QuadraticExt.Name].hasExtFieldMul()` is enabled, complex Fp2
-  # multiplication still uses the double-width software `prod2x_complex` +
-  # `redc2x` path rather than single-width `prod_complex`. Routing accelerated
-  # Fp2 through single-width multiplication is tracked in:
-  # https://github.com/LFDT-Lineth/lineth-monorepo/issues/4496
-
   when r.fromComplexExtension():
-    when UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem():
-      when Fp[QuadraticExt.Name].hasExtFieldMul():
+    when QuadraticExt.Name.skipLazyReduction():
+      # Accelerated Fp multiplication: 4 direct single-width products
+      # beat 3 double-width products + 2 redc2x, see `skipLazyReduction`.
+      r.prod_complex(a, b)
+    elif UseASM_X86_64 and not QuadraticExt.Name.has_large_field_elem():
+      if ({.noSideEffect.}: hasAdx()):
+        r.coords.mul_fp2_complex_asm_adx(a.coords, b.coords)
+      else:
         var d {.noInit.}: doublePrec(typeof(r))
         d.prod2x_complex(a, b)
         r.c0.redc2x(d.c0)
         r.c1.redc2x(d.c1)
-      else:
-        if ({.noSideEffect.}: hasAdx()):
-          r.coords.mul_fp2_complex_asm_adx(a.coords, b.coords)
-        else:
-          var d {.noInit.}: doublePrec(typeof(r))
-          d.prod2x_complex(a, b)
-          r.c0.redc2x(d.c0)
-          r.c1.redc2x(d.c1)
     else:
       var d {.noInit.}: doublePrec(typeof(r))
       d.prod2x_complex(a, b)
@@ -1402,6 +1454,11 @@ func prod*(r: var QuadraticExt, a, b: QuadraticExt) =
     when QuadraticExt is Fp12 or r.typeof.F.Name.has_large_field_elem():
       # BW6-761 requires too many registers for Dbl width path
       r.prod_generic(a, b)
+    elif QuadraticExt.Name.skipLazyReduction():
+      # Single-width products, see `skipLazyReduction`.
+      # Schoolbook (16 Fp products, fewest additions) over Fp2:
+      # additions cost more than accelerated products.
+      r.prod_disjoint_schoolbook(a, b.c0, b.c1)
     elif QuadraticExt is Fp4 and QuadraticExt.Name.getNonResidueFp() == -1 and QuadraticExt.Name.getNonResidueFp2() == (1, 1):
       r.prodImpl_fp4o2_complex_snr_1pi(a, b)
     else:
@@ -2152,7 +2209,8 @@ func inv2xImpl(r: var CubicExt, a: CubicExt, useVartime: static bool = false) =
 
 func square*(r: var CubicExt, a: CubicExt) =
   ## Returns r = a²
-  when CubicExt.Name.has_large_NR_norm() or CubicExt.Name.has_large_field_elem():
+  when CubicExt.Name.has_large_NR_norm() or CubicExt.Name.has_large_field_elem() or
+       CubicExt.Name.skipLazyReduction():
     square_Chung_Hasan_SQR3(r, a)
   else:
     var d {.noInit.}: doublePrec(typeof(a))
@@ -2171,7 +2229,9 @@ func square2x*(r: var CubicExt2x, a: CubicExt) =
 
 func prod*(r: var CubicExt, a, b: CubicExt) =
   ## Out-of-place multiplication
-  when CubicExt.Name.has_large_field_elem():
+  when CubicExt.Name.has_large_field_elem() or CubicExt.Name.skipLazyReduction():
+    # With skipLazyReduction, Karatsuba over Fp2 single-width products
+    # beats prodImpl_fp6o2_complex_snr_1pi (36 Fp products instead of 24)
     r.prodImpl(a, b)
   elif r is Fp6 and CubicExt.Name.getNonResidueFp() == -1 and CubicExt.Name.getNonResidueFp2() == (1, 1):
     r.prodImpl_fp6o2_complex_snr_1pi(a, b)
@@ -2197,7 +2257,7 @@ func inv*(r: var CubicExt, a: CubicExt) =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when CubicExt.Name.has_large_field_elem() or r is Fp12:
+  when CubicExt.Name.has_large_field_elem() or CubicExt.Name.skipLazyReduction() or r is Fp12:
     r.invImpl(a)
   else:
     r.inv2xImpl(a)
@@ -2260,7 +2320,7 @@ func inv_vartime*(r: var CubicExt, a: CubicExt) {.tags:[VarTime].} =
   ## Incidentally this avoids extra check
   ## to convert Jacobian and Projective coordinates
   ## to affine for elliptic curve
-  when CubicExt.Name.has_large_field_elem() or r is Fp12:
+  when CubicExt.Name.has_large_field_elem() or CubicExt.Name.skipLazyReduction() or r is Fp12:
     r.invImpl(a, useVartime = true)
   else:
     r.inv2xImpl(a, useVartime = true)

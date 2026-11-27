@@ -505,7 +505,12 @@ func cyclotomic_square_compressed*[F](g: var G2345[F]) =
   var h2h3 {.noInit.}, h4h5 {.noInit.}: QuadraticExt[F]
 
   h2h3.square(g4g5)
-  h2h3 *= NonResidue
+  when F.Name.skipLazyReduction():
+    # u(h₀+h₁u) = ξh₁ + h₀u: scale h₁ in place and swap the coordinates' roles below,
+    # this avoids the coordinate copies of `*= NonResidue` (accelerated builds only)
+    h2h3.c1 *= NonResidue
+  else:
+    h2h3 *= NonResidue
   h2h3 *= 3
 
   h4h5.square(g2g3)
@@ -514,8 +519,12 @@ func cyclotomic_square_compressed*[F](g: var G2345[F]) =
   g2g3.double()
   g4g5.double()
 
-  g.g2.sum(h2h3.c0, g2g3.c0)
-  g.g3.diff(h2h3.c1, g2g3.c1)
+  when F.Name.skipLazyReduction():
+    g.g2.sum(h2h3.c1, g2g3.c0)
+    g.g3.diff(h2h3.c0, g2g3.c1)
+  else:
+    g.g2.sum(h2h3.c0, g2g3.c0)
+    g.g3.diff(h2h3.c1, g2g3.c1)
   g.g4.diff(h4h5.c0, g4g5.c0)
   g.g5.sum(h4h5.c1, g4g5.c1)
 
