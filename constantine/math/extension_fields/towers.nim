@@ -868,13 +868,13 @@ func prod_complex(r: var Fp2, a, b: Fp2) {.meter, used.} =
     t3.prod(a.c1, b.c0)
     r.c0.diff(t0, t1)
     r.c1.sum(t2, t3)
-    return
-  var t {.noInit.}: typeof(r)
-  var na1 {.noInit.}: typeof(r.c0)
-  na1.neg(a.c1)
-  t.c0.sumprod([a.c0, na1], [b.c0, b.c1])
-  t.c1.sumprod([a.c0, a.c1], [b.c1, b.c0])
-  r = t
+  else:
+    var t {.noInit.}: typeof(r)
+    var na1 {.noInit.}: typeof(r.c0)
+    na1.neg(a.c1)
+    t.c0.sumprod([a.c0, na1], [b.c0, b.c1])
+    t.c1.sumprod([a.c0, a.c1], [b.c1, b.c0])
+    r = t
 
 func prod2x_complex(r: var QuadraticExt2x, a, b: Fp2) {.meter.} =
   ## Double-precision unreduced complex multiplication
