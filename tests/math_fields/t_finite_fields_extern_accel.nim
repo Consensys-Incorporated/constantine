@@ -33,6 +33,27 @@ when WordBitWidth == 64:
     OpDiv = 1'u32
     OpSqrt = 2'u32
 
+  proc checkSmallInt[F](_: typedesc[F], expectedId: uint32, a: F, k: static int) =
+    ## *= / prod by a small static int = 1 MUL ECALL,
+    ## same result as repeated additions
+    var expected: F
+    expected.setZero()
+    for _ in 0 ..< abs(k):
+      expected += a
+    if k < 0:
+      expected.neg()
+    mock_zkvm_field_op_reset()
+    var x = a
+    x *= k
+    check mock_zkvm_field_op_count(OpMul, expectedId) == 1'u64
+    check mock_zkvm_field_op_total() == 1'u64
+    check bool(x == expected)
+    mock_zkvm_field_op_reset()
+    var y {.noInit.}: F
+    y.prod(a, k)
+    check mock_zkvm_field_op_total() == 1'u64
+    check bool(y == expected)
+
   template checkPlainFieldContract(F: typedesc, expectedId: uint32, expectSqrt: bool) =
     static:
       doAssert F.extFieldId() == expectedId
@@ -90,6 +111,24 @@ when WordBitWidth == 64:
     var aSqProd: F
     aSqProd.prod(a, a)
     check bool(r == aSqProd)
+
+    # *= / prod by a small static int: 1 MUL ECALL (b = 1 and b = 0: none)
+    checkSmallInt(F, expectedId, a, 2)
+    checkSmallInt(F, expectedId, a, 3)
+    checkSmallInt(F, expectedId, a, 4)
+    checkSmallInt(F, expectedId, a, 12)
+    checkSmallInt(F, expectedId, a, 21)
+    checkSmallInt(F, expectedId, a, -1)
+    checkSmallInt(F, expectedId, a, -3)
+    checkSmallInt(F, expectedId, a, -12)
+    block:
+      mock_zkvm_field_op_reset()
+      var x = a
+      x *= 1
+      check bool(x == a)
+      x *= 0
+      check bool(x.isZero())
+      check mock_zkvm_field_op_total() == 0'u64
 
     # div2 = 0 ECALLs
     mock_zkvm_field_op_reset()
