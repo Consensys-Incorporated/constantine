@@ -1085,7 +1085,7 @@ proc run_EC_subgroups_cofactors_impl*(
         for _ in 0 ..< ItersMul:
           let P = rng.random_point(EC, randZ, gen)
           var rP = P
-          rP.scalarMulGeneric(Fr[EC.F].getModulus())
+          rP.scalarMulGeneric(EC.getScalarField().getModulus())
           if bool rP.isNeutral():
             inSubgroup += 1
             doAssert bool P.isInSubgroup(), "Subgroup check issue on " & $EC & " with P: " & P.toHex()
@@ -1097,7 +1097,7 @@ proc run_EC_subgroups_cofactors_impl*(
           var rQ: typeof(rP)
           Q.clearCofactor()
           rQ = Q
-          rQ.scalarMulGeneric(Fr[EC.F].getModulus())
+          rQ.scalarMulGeneric(EC.getScalarField().getModulus())
           doAssert bool rQ.isNeutral(), "Cofactor clearing issue on " & $EC & " with Q: " & Q.toHex()
           doAssert bool Q.isInSubgroup(), "Subgroup check issue on " & $EC & " with Q: " & Q.toHex()
 
