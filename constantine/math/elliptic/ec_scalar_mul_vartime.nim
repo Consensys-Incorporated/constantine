@@ -9,6 +9,7 @@
 import
   # Internals
   ./ec_shortweierstrass_affine,
+  ./ec_shortweierstrass_affine_vartime,
   ./ec_shortweierstrass_jacobian,
   ./ec_shortweierstrass_projective,
   ./ec_twistededwards_affine,
@@ -468,6 +469,110 @@ func scalarMulEndo_wNAF_vartime*[scalBits: static int; EC](
       else:
         isInit = P.initNAF(tab[m], tabNaf[m], NafLen, i)
 
+# Affine accumulator variants for accelerated fields
+# ------------------------------------------------------------
+#
+# With an external field accelerator, division costs as much as a multiplication
+# and affine formulas need the fewest software additions,
+# see ec_shortweierstrass_affine_vartime.nim. The following mirror
+# scalarMul_wNAF_vartime and scalarMulEndo_wNAF_vartime with affine tables
+# (no batchAffine) and an affine accumulator.
+
+func accumNAFAff[precompSize, NafMax: static int, ECaff](
+       P: var ECaff,
+       tab: array[precompSize, ECaff],
+       naf: array[NafMax, int8], nafLen: int,
+       nafIteratorIdx: int) {.inline.} =
+  let digit = naf[nafLen-1-nafIteratorIdx]
+  if digit > 0:
+    P.affineSum_vartime(P, tab[digit shr 1])
+  elif digit < 0:
+    P.affineDiff_vartime(P, tab[-digit shr 1])
+
+func oddMultiplesAff[N: static int, ECaff](tab: var array[N, ECaff], P: ECaff) {.inline.} =
+  ## tab[i] <- [2i+1]P
+  var P2 {.noInit.}: ECaff
+  tab[0] = P
+  P2.affineDouble_vartime(P)
+  for i in 1 ..< N:
+    tab[i].affineSum_vartime(tab[i-1], P2)
+
+func scalarMul_wNAF_affine_vartime[EC](P: var EC, scalar: BigInt, window: static int) {.tags:[VarTime], meter.} =
+  ## **Variable-time** windowed-NAF scalar multiplication P <- [k]P
+  ## with an affine accumulator, for accelerated fields (useAffineVartime)
+  ##
+  ## This MUST NOT be used with secret data.
+  const precompSize = 1 shl (window - 2)
+  static: doAssert window < 8
+
+  var Paff {.noInit.}: affine(EC)
+  Paff.affine(P)
+  var tab {.noinit.}: array[precompSize, affine(EC)]
+  tab.oddMultiplesAff(Paff)
+
+  var naf {.noInit.}: array[BigInt.bits+1, int8]
+  let nafLen = naf.recode_r2l_signed_window_vartime(scalar, window)
+
+  var acc {.noInit.}: affine(EC)
+  acc.setNeutral()
+  for i in 0 ..< nafLen:
+    acc.affineDouble_vartime(acc) # [2]O = O
+    acc.accumNAFAff(tab, naf, nafLen, i)
+  P.fromAffine(acc)
+
+func scalarMulEndo_wNAF_affine_vartime[scalBits: static int; EC](
+       P: var EC,
+       scalar: BigInt[scalBits],
+       window: static int) {.tags:[VarTime], meter.} =
+  ## Endomorphism-accelerated windowed vartime scalar multiplication P <- [k]P
+  ## with an affine accumulator, for accelerated fields (useAffineVartime)
+  ##
+  ## This MUST NOT be used with secret data.
+  const precompSize = 1 shl (window - 2)
+  static: doAssert window < 8
+  const M = when P.F is Fp:  2
+            elif P.F is Fp2: 4
+            else: {.error: "Unconfigured".}
+  const G = EC.G
+
+  # 1. Affine base point and endomorphisms
+  var bases {.noInit.}: array[M, affine(EC)]
+  bases[0].affine(P)
+  cast[ptr array[M-1, affine(EC)]](bases[1].addr)[].computeEndomorphisms(bases[0])
+
+  # 2. Decompose scalar into mini-scalars
+  const L = EC.getScalarField().bits().ceilDiv_vartime(M) + 1
+  var miniScalars {.noInit.}: array[M, BigInt[L]]
+  var negatePoints {.noInit.}: array[M, SecretBool]
+  miniScalars.decomposeEndo(negatePoints, scalar, EC.getScalarField().bits(), EC.getName(), G)
+
+  # 3. Handle negative mini-scalars and build the odd multiples tables
+  var tab {.noinit.}: array[M, array[precompSize, affine(EC)]]
+  for m in 0 ..< M:
+    if negatePoints[m].bool:
+      bases[m].neg()
+    tab[m].oddMultiplesAff(bases[m])
+
+  # 4. wNAF recoding
+  const NafLen = L+1
+  var tabNaf {.noinit.}: array[M, array[NafLen, int8]]
+  for m in 0 ..< M:
+    let miniScalarLen = tabNaf[m].recode_r2l_signed_window_vartime(miniScalars[m], window)
+    for i in miniScalarLen ..< NafLen:
+      tabNaf[m][i] = 0
+
+  # 5. Compute
+  var acc {.noInit.}: affine(EC)
+  acc.setNeutral()
+  for i in 0 ..< NafLen:
+    acc.affineDouble_vartime(acc) # [2]O = O
+    for m in 0 ..< M:
+      acc.accumNAFAff(tab[m], tabNaf[m], NafLen, i)
+  P.fromAffine(acc)
+
+template useAffineScalarMul(EC: typedesc): bool =
+  (EC is EC_ShortW_Jac or EC is EC_ShortW_Prj) and EC.F.useAffineVartime()
+
 # Double-base scalar multiplication [u₁]G + [u₂]Q
 # ------------------------------------------------------------
 
@@ -483,6 +588,31 @@ func accumWnafDigit[EC, ECaff](
   elif digit < 0:
     if negate: P ~+= tab[(-digit) shr 1]
     else:      P ~-= tab[(-digit) shr 1]
+
+func accumWnafDigitAff[ECaff](
+       P: var ECaff,
+       tab: openArray[ECaff],
+       digit: int8, negate: bool) {.inline.} =
+  ## Affine accumulator version of accumWnafDigit
+  if digit > 0:
+    if negate: P.affineDiff_vartime(P, tab[digit shr 1])
+    else:      P.affineSum_vartime(P, tab[digit shr 1])
+  elif digit < 0:
+    if negate: P.affineSum_vartime(P, tab[(-digit) shr 1])
+    else:      P.affineDiff_vartime(P, tab[(-digit) shr 1])
+
+func accumWnafDigitDblAff[ECaff](
+       P: var ECaff,
+       tab: openArray[ECaff],
+       digit: int8, negate: bool) {.inline.} =
+  ## P <- [2]P ± [|digit|]B with tab[i] = [2i+1]B, digit ≠ 0,
+  ## the sign being the sign of digit, flipped if `negate`
+  if digit > 0:
+    if negate: P.affineDoubleDiff_vartime(P, tab[digit shr 1])
+    else:      P.affineDoubleSum_vartime(P, tab[digit shr 1])
+  else:
+    if negate: P.affineDoubleSum_vartime(P, tab[(-digit) shr 1])
+    else:      P.affineDoubleDiff_vartime(P, tab[(-digit) shr 1])
 
 func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
        r: var EC,
@@ -522,13 +652,21 @@ func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
   # 2. Odd multiples of Q and of φ(Q), φ(x, y) = (βx, y) preserves the multiples
   var tabQ {.noInit.}, tabEndoQ {.noInit.}: array[tabQLen, ECaff]
   block:
-    var tabJac {.noInit.}: array[tabQLen, EC]
-    var Q2 {.noInit.}: EC
-    tabJac[0].fromAffine(Q)
-    Q2.double(tabJac[0])
-    for i in 1 ..< tabQLen:
-      tabJac[i].sum_vartime(tabJac[i-1], Q2)
-    tabQ.batchAffine_vartime(tabJac)
+    when ECaff.F.useAffineVartime():
+      # Accelerated division: build the table directly in affine coordinates
+      var Q2 {.noInit.}: ECaff
+      tabQ[0] = Q
+      Q2.affineDouble_vartime(Q)
+      for i in 1 ..< tabQLen:
+        tabQ[i].affineSum_vartime(tabQ[i-1], Q2)
+    else:
+      var tabJac {.noInit.}: array[tabQLen, EC]
+      var Q2 {.noInit.}: EC
+      tabJac[0].fromAffine(Q)
+      Q2.double(tabJac[0])
+      for i in 1 ..< tabQLen:
+        tabJac[i].sum_vartime(tabJac[i-1], Q2)
+      tabQ.batchAffine_vartime(tabJac)
     for i in 0 ..< tabQLen:
       tabEndoQ[i].computeEndomorphism(tabQ[i])
 
@@ -542,14 +680,37 @@ func scalarMulDoubleBaseEndo_wNAF_vartime[scalBits: static int; EC, ECaff](
   nafLen = max(nafLen, nafs[3].recode_r2l_signed_window_vartime(k2[1], windowQ))
 
   # 4. Interleaved double-and-add from the most significant digit
-  r.setNeutral()
-  for i in countdown(nafLen-1, 0):
-    if not r.isNeutral().bool:
-      r.double()
-    r.accumWnafDigit(tabG,     nafs[0][i], neg1[0].bool)
-    r.accumWnafDigit(tabEndoG, nafs[1][i], neg1[1].bool)
-    r.accumWnafDigit(tabQ,     nafs[2][i], neg2[0].bool)
-    r.accumWnafDigit(tabEndoQ, nafs[3][i], neg2[1].bool)
+  when ECaff.F.useAffineVartime():
+    # Accelerated division: affine accumulator, see ec_shortweierstrass_affine_vartime
+    # The doubling is fused with the first non-zero digit of each step: acc <- [2]acc ± T
+    var acc {.noInit.}: ECaff
+    acc.setNeutral()
+    var doubled: bool
+    template accum(tab: untyped, digit: int8, negate: bool) =
+      if digit != 0:
+        if doubled:
+          acc.accumWnafDigitAff(tab, digit, negate)
+        else:
+          acc.accumWnafDigitDblAff(tab, digit, negate)
+          doubled = true
+    for i in countdown(nafLen-1, 0):
+      doubled = false
+      accum(tabG,     nafs[0][i], neg1[0].bool)
+      accum(tabEndoG, nafs[1][i], neg1[1].bool)
+      accum(tabQ,     nafs[2][i], neg2[0].bool)
+      accum(tabEndoQ, nafs[3][i], neg2[1].bool)
+      if not doubled:
+        acc.affineDouble_vartime(acc) # [2]O = O
+    r.fromAffine(acc)
+  else:
+    r.setNeutral()
+    for i in countdown(nafLen-1, 0):
+      if not r.isNeutral().bool:
+        r.double()
+      r.accumWnafDigit(tabG,     nafs[0][i], neg1[0].bool)
+      r.accumWnafDigit(tabEndoG, nafs[1][i], neg1[1].bool)
+      r.accumWnafDigit(tabQ,     nafs[2][i], neg2[0].bool)
+      r.accumWnafDigit(tabEndoQ, nafs[3][i], neg2[1].bool)
 
 # ############################################################
 #
@@ -578,19 +739,31 @@ func scalarMul_vartime*[scalBits; EC](P: var EC, scalar: BigInt[scalBits]) {.met
     when scalBits >= EndomorphismThreshold: # Skip static: doAssert when multiplying by intentionally small scalars.
       if usedBits >= EndomorphismThreshold:
         when EC.F is Fp:
-          P.scalarMulEndo_wNAF_vartime(scalar, window = 4)
+          when EC.useAffineScalarMul():
+            P.scalarMulEndo_wNAF_affine_vartime(scalar, window = 4)
+          else:
+            P.scalarMulEndo_wNAF_vartime(scalar, window = 4)
         elif EC.F is Fp2:
-          P.scalarMulEndo_wNAF_vartime(scalar, window = 3)
+          when EC.useAffineScalarMul():
+            P.scalarMulEndo_wNAF_affine_vartime(scalar, window = 3)
+          else:
+            P.scalarMulEndo_wNAF_vartime(scalar, window = 3)
         else: # Curves defined on Fp^m with m > 2
           {.error: "Unreachable".}
         return
 
   if usedBits > 64:
     # With a window of 4, we precompute 2^4 = 4 points
-    P.scalarMul_wNAF_vartime(scalar, window = 4)
+    when EC.useAffineScalarMul():
+      P.scalarMul_wNAF_affine_vartime(scalar, window = 4)
+    else:
+      P.scalarMul_wNAF_vartime(scalar, window = 4)
   elif usedBits >= 8:
     # With a window of 3, we precompute 2^1 = 2 points
-    P.scalarMul_wNAF_vartime(scalar, window = 3)
+    when EC.useAffineScalarMul():
+      P.scalarMul_wNAF_affine_vartime(scalar, window = 3)
+    else:
+      P.scalarMul_wNAF_vartime(scalar, window = 3)
   elif usedBits > 5:
     P.scalarMul_doubleAdd_vartime(scalar)
   else: # 5-bit: [0, 32)

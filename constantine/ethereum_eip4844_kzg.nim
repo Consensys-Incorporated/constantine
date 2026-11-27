@@ -20,7 +20,8 @@ import
   ./hashes,
   ./platforms/[abstractions, allocs],
   ./serialization/[codecs_status_codes, codecs_bls12_381, endians],
-  ./commitments_setups/ethereum_kzg_srs
+  ./commitments_setups/ethereum_kzg_srs,
+  ./named/constants/bls12_381_subgroups
 
 export
   delete,
@@ -237,19 +238,31 @@ proc bls_field_to_bytes(dst: var array[32, byte], scalar: Fr[BLS12_381]) {.inlin
 
 func bytes_to_kzg_commitment(dst: var KZGCommitment, src: array[48, byte]): CttCodecEccStatus {.inline.} =
   ## Convert untrusted bytes into a trusted and validated KZGCommitment.
-  let status = dst.distinctBase().deserialize_g1_compressed(src)
+  ## Same statuses as deserialize_g1_compressed, but the input is public,
+  ## so the subgroup check is variable-time (faster with a field accelerator).
+  let status = dst.distinctBase().deserialize_g1_compressed_unchecked(src)
   if status == cttCodecEcc_PointAtInfinity:
     # Point at infinity is allowed
     return cttCodecEcc_Success
-  return status
+  if status != cttCodecEcc_Success:
+    return status
+  if not dst.distinctBase().isInSubgroup_vartime().bool:
+    return cttCodecEcc_PointNotInSubgroup
+  return cttCodecEcc_Success
 
 func bytes_to_kzg_proof(dst: var KZGProof, src: array[48, byte]): CttCodecEccStatus {.inline.} =
   ## Convert untrusted bytes into a trusted and validated KZGProof.
-  let status = dst.distinctBase().deserialize_g1_compressed(src)
+  ## Same statuses as deserialize_g1_compressed, but the input is public,
+  ## so the subgroup check is variable-time (faster with a field accelerator).
+  let status = dst.distinctBase().deserialize_g1_compressed_unchecked(src)
   if status == cttCodecEcc_PointAtInfinity:
     # Point at infinity is allowed
     return cttCodecEcc_Success
-  return status
+  if status != cttCodecEcc_Success:
+    return status
+  if not dst.distinctBase().isInSubgroup_vartime().bool:
+    return cttCodecEcc_PointNotInSubgroup
+  return cttCodecEcc_Success
 
 func blob_to_bigint_polynomial(
        dst: ptr PolynomialEval[FIELD_ELEMENTS_PER_BLOB, Fr[BLS12_381].getBigInt(), kBitReversed],

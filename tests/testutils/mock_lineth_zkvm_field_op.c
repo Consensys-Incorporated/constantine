@@ -133,6 +133,76 @@ static void u_powmod(uint64_t *out, const uint64_t *base, const uint64_t *exp, c
   memcpy(out, acc, (size_t)n * sizeof(uint64_t));
 }
 
+static uint64_t u_add(uint64_t *out, const uint64_t *a, const uint64_t *b, int n) {
+  unsigned __int128 carry = 0;
+  for (int i = 0; i < n; ++i) {
+    carry += (unsigned __int128)a[i] + b[i];
+    out[i] = (uint64_t)carry;
+    carry >>= 64;
+  }
+  return (uint64_t)carry;
+}
+
+/* a >>= 1, shifting `top` (0 or 1) into the most significant bit */
+static void u_shr1(uint64_t *a, uint64_t top, int n) {
+  for (int i = 0; i < n - 1; ++i) {
+    a[i] = (a[i] >> 1) | (a[i + 1] << 63);
+  }
+  a[n - 1] = (a[n - 1] >> 1) | (top << 63);
+}
+
+/* x <- x/2 mod p, x < p, p odd */
+static void u_half_mod(uint64_t *x, const uint64_t *p, int n) {
+  uint64_t top = 0;
+  if (x[0] & 1ULL) {
+    top = u_add(x, x, p, n);
+  }
+  u_shr1(x, top, n);
+}
+
+/* x <- x - y mod p, x, y < p */
+static void u_submod(uint64_t *x, const uint64_t *y, const uint64_t *p, int n) {
+  if (u_sub(x, x, y, n)) {
+    u_add(x, x, p, n);
+  }
+}
+
+static int u_is_one(const uint64_t *a, int n) {
+  uint64_t acc = a[0] ^ 1ULL;
+  for (int i = 1; i < n; ++i) acc |= a[i];
+  return acc == 0;
+}
+
+/* out <- a/b mod p, with a, b < p, b != 0, p an odd prime.
+ * Variable-time binary extended Euclid (Hankerson-Menezes-Vanstone,
+ * Guide to ECC, Alg. 2.22) seeded with a instead of 1, so it computes
+ * the quotient directly. Linear in the bit length, unlike a Fermat
+ * exponentiation. */
+static void u_divmod(uint64_t *out, const uint64_t *a, const uint64_t *b, const uint64_t *p, int n) {
+  uint64_t u[6] = {0}, v[6] = {0}, x1[6] = {0}, x2[6] = {0};
+  memcpy(u, b, (size_t)n * sizeof(uint64_t));
+  memcpy(v, p, (size_t)n * sizeof(uint64_t));
+  memcpy(x1, a, (size_t)n * sizeof(uint64_t));
+  while (!u_is_one(u, n) && !u_is_one(v, n)) {
+    while ((u[0] & 1ULL) == 0) {
+      u_shr1(u, 0, n);
+      u_half_mod(x1, p, n);
+    }
+    while ((v[0] & 1ULL) == 0) {
+      u_shr1(v, 0, n);
+      u_half_mod(x2, p, n);
+    }
+    if (u_cmp(u, v, n) >= 0) {
+      u_sub(u, u, v, n);
+      u_submod(x1, x2, p, n);
+    } else {
+      u_sub(v, v, u, n);
+      u_submod(x2, x1, p, n);
+    }
+  }
+  memcpy(out, u_is_one(u, n) ? x1 : x2, (size_t)n * sizeof(uint64_t));
+}
+
 static uint32_t mock_field_op_impl(
     uint32_t op,
     uint32_t field,
@@ -165,12 +235,8 @@ static uint32_t mock_field_op_impl(
       memset(out, 0, nbytes);
       return 1;
     }
-    uint64_t two[6] = {2, 0, 0, 0, 0, 0};
-    uint64_t p_minus_2[6] = {0};
-    u_sub(p_minus_2, p, two, n);
-    uint64_t inv_b[6] = {0}, res[6] = {0}, chk[6] = {0};
-    u_powmod(inv_b, b_red, p_minus_2, p, n);
-    u_mulmod(res, a_red, inv_b, p, n);
+    uint64_t res[6] = {0}, chk[6] = {0};
+    u_divmod(res, a_red, b_red, p, n);
     u_mulmod(chk, res, b_red, p, n);
     if (u_cmp(chk, a_red, n) != 0) {
       fprintf(stderr, "mock_lineth_zkvm_field_op: DIV verification failed\n");

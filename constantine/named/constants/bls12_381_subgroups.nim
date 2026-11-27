@@ -14,6 +14,7 @@ import
   constantine/math/extension_fields,
   constantine/math/ec_shortweierstrass,
   constantine/math/elliptic/ec_scalar_mul,
+  constantine/math/elliptic/ec_shortweierstrass_affine_vartime,
   constantine/math/io/io_bigints,
   constantine/math/endomorphisms/frobenius,
   constantine/named/zoo_endomorphisms
@@ -226,3 +227,69 @@ func isInSubgroup*(P: EC_ShortW_Aff[Fp2[BLS12_381], G2]): SecretBool =
   var t{.noInit.}: EC_ShortW_Jac[Fp2[BLS12_381], G2]
   t.fromAffine(P)
   return t.isInSubgroup()
+
+# ############################################################
+#
+#            Subgroup checks - variable-time
+#
+# ############################################################
+#
+# For public inputs only (EVM precompiles, KZG commitments and proofs).
+# With an external field accelerator a division is as cheap as a multiplication
+# and affine formulas need the fewest software additions
+# (see ec_shortweierstrass_affine_vartime.nim): the [|u|]P chains of the
+# constant-time checks above (projective / Jacobian, ~64 doublings each)
+# are done with variable-time affine doublings and additions instead.
+# Without an accelerator these fall back to the constant-time isInSubgroup.
+
+func pow_bls12_381_abs_x_vartime[F; G: static Subgroup](
+       r: var EC_ShortW_Aff[F, G],
+       P: EC_ShortW_Aff[F, G]) =
+  ## [|x|]P with |x| = 0xd201000000010000 the absolute value of the BLS12-381 parameter,
+  ## same addition chain as pow_bls12_381_abs_x, in affine coordinates.
+  ## r MUST NOT alias P.
+  r.affineDouble_vartime(P)
+  r.affineSum_vartime(r, P)         # 0b11
+  for numDoublings in [2, 3, 9, 32]:
+    for _ in 0 ..< numDoublings:
+      r.affineDouble_vartime(r)
+    r.affineSum_vartime(r, P)       # 0b1101, 0b1101001, 0b1101001000000001, ...
+  for _ in 0 ..< 16:
+    r.affineDouble_vartime(r)       # 0b1101001000000001000000000000000000000000000000010000000000000000
+
+func isInSubgroup_vartime*(P: EC_ShortW_Aff[Fp[BLS12_381], G1]): SecretBool {.tags:[VarTime].} =
+  ## **Variable-time** check that P is in 𝔾1, i.e. P is a point of order r.
+  ## Same result as `isInSubgroup`. P MUST be public.
+  ##
+  ## Warning ⚠: Assumes that P is on curve
+  when Fp[BLS12_381].useAffineVartime():
+    # Scott, https://eprint.iacr.org/2021/1130.pdf: P ∈ 𝔾1 iff ϕ(P) == [-u²]P
+    # with ϕ(x, y) = (βx, y): check βx = x([u²]P) and y = -y([u²]P)
+    if P.isNeutral().bool:
+      return CtTrue
+    var t0 {.noInit.}, t1 {.noInit.}: EC_ShortW_Aff[Fp[BLS12_381], G1]
+    t0.pow_bls12_381_abs_x_vartime(P)  # [|u|]P
+    t1.pow_bls12_381_abs_x_vartime(t0) # [u²]P
+    var bx {.noInit.}: Fp[BLS12_381]
+    bx.prod(P.x, BLS12_381.getCubicRootOfUnity_mod_p())
+    t1.y.neg()
+    return (bx == t1.x) and (P.y == t1.y)
+  else:
+    return P.isInSubgroup()
+
+func isInSubgroup_vartime*(P: EC_ShortW_Aff[Fp2[BLS12_381], G2]): SecretBool {.tags:[VarTime].} =
+  ## **Variable-time** check that P is in 𝔾2, i.e. P is a point of order r.
+  ## Same result as `isInSubgroup`. P MUST be public.
+  ##
+  ## Warning ⚠: Assumes that P is on curve
+  when Fp[BLS12_381].useAffineVartime():
+    # Scott, https://eprint.iacr.org/2021/1130.pdf: P ∈ 𝔾2 iff ψ(P) == [u]P = -[|u|]P
+    if P.isNeutral().bool:
+      return CtTrue
+    var t0 {.noInit.}, t1 {.noInit.}: EC_ShortW_Aff[Fp2[BLS12_381], G2]
+    t0.pow_bls12_381_abs_x_vartime(P)  # [|u|]P
+    t0.neg()                           # [u]P
+    t1.frobenius_psi(P)                # ψ(P)
+    return t0 == t1
+  else:
+    return P.isInSubgroup()
